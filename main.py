@@ -1,10 +1,11 @@
 import torch
 from diffusers import StableDiffusionPipeline
-from transformers import CLIPTextModel, CLIPTokenizer
-from diffusers import AutoencoderKL, UNet2DConditionModel, PNDMScheduler
+
+# from transformers import CLIPTextModel, CLIPTokenizer
+# from diffusers import AutoencoderKL, UNet2DConditionModel, PNDMScheduler
 from tqdm.auto import tqdm
 from PIL import Image
-
+import time
 import pdb
 
 
@@ -68,6 +69,7 @@ def main():
     latents = latents * scheduler.init_noise_sigma
 
     # denoising
+    start_time = time.perf_counter()
     scheduler.set_timesteps(num_inference_steps)
     for t in tqdm(scheduler.timesteps):
         # expand the latents if we are doing classifier-free guidance to avoid doing two forward passes.
@@ -89,6 +91,9 @@ def main():
         # compute the previous noisy sample x_t -> x_t-1
         latents = scheduler.step(noise_pred, t, latents).prev_sample
 
+    end_time = time.perf_counter()
+    print(f"Time taken for {num_inference_steps}: {end_time-start_time} seconds")
+
     # scale and decode the image latents with vae
     latents = 1 / 0.18215 * latents
     with torch.no_grad():
@@ -99,9 +104,6 @@ def main():
     image = image.detach().cpu().permute(0, 2, 3, 1).numpy()
     images = (image * 255).round().astype("uint8")
     pil_images = [Image.fromarray(image) for image in images]
-
-    pdb.set_trace()
-
     pil_images[0].save("astronaut_rides_horse.png")
 
 
