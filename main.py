@@ -60,9 +60,9 @@ def main():
     latents = torch.randn(
         (batch_size, unet.config.in_channels, height // 8, width // 8),
         generator=generator,
-        dtype=torch.float32,
+        dtype=torch.float16,
     )
-    latents.to(device)
+    latents = latents.to(device)
 
     scheduler.set_timesteps(num_inference_steps)
     latents = latents * scheduler.init_noise_sigma
@@ -74,6 +74,7 @@ def main():
         latent_model_input = torch.cat([latents] * 2)
         latent_model_input = scheduler.scale_model_input(latent_model_input, timestep=t)
 
+        pdb.set_trace()
         # predict the noise residual
         with torch.no_grad():
             noise_pred = unet(
