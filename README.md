@@ -1,1 +1,1 @@
-# stable-diffusion-on-device
+# Stable-Diffusion On-device
