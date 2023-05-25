@@ -74,7 +74,6 @@ def main():
         latent_model_input = torch.cat([latents] * 2)
         latent_model_input = scheduler.scale_model_input(latent_model_input, timestep=t)
 
-        pdb.set_trace()
         # predict the noise residual
         with torch.no_grad():
             noise_pred = unet(
@@ -100,11 +99,10 @@ def main():
     image = image.detach().cpu().permute(0, 2, 3, 1).numpy()
     images = (image * 255).round().astype("uint8")
     pil_images = [Image.fromarray(image) for image in images]
-    pil_images[0]
 
-    # pdb.set_trace()
+    pdb.set_trace()
 
-    pil_images.save("astronaut_rides_horse.png")
+    pil_images[0].save("astronaut_rides_horse.png")
 
 
 if __name__ == "__main__":
