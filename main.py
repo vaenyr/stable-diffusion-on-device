@@ -22,10 +22,10 @@ def main():
     scheduler = pipe.scheduler
 
     # set all networks to gpu
-    torch_device = "cuda"
-    vae.to(torch_device)
-    text_encoder.to(torch_device)
-    unet.to(torch_device)
+    device = "cuda"
+    vae.to(device)
+    text_encoder.to(device)
+    unet.to(device)
 
     # set params
     height = 512  # default height of Stable Diffusion
@@ -45,7 +45,7 @@ def main():
         truncation=True,
         return_tensors="pt",
     )
-    text_embeddings = text_encoder(text_input.input_ids.to(torch_device))[0]
+    text_embeddings = text_encoder(text_input.input_ids.to(device))[0]
     max_length = text_input.input_ids.shape[-1]
     uncond_input = tokenizer(
         [""] * batch_size,
@@ -53,15 +53,16 @@ def main():
         max_length=max_length,
         return_tensors="pt",
     )
-    uncond_embeddings = text_encoder(uncond_input.input_ids.to(torch_device))[0]
+    uncond_embeddings = text_encoder(uncond_input.input_ids.to(device))[0]
     text_embeddings = torch.cat([uncond_embeddings, text_embeddings])
 
     # generate initial random noise for input [B, 4, 64, 64]
     latents = torch.randn(
-        (batch_size, unet.in_channels, height // 8, width // 8),
+        (batch_size, unet.config.in_channels, height // 8, width // 8),
         generator=generator,
+        dtype=torch.float32,
+        device=device,
     )
-    latents = latents.to(torch_device)
 
     scheduler.set_timesteps(num_inference_steps)
     latents = latents * scheduler.init_noise_sigma
