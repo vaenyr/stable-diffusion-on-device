@@ -61,8 +61,8 @@ def main():
         (batch_size, unet.config.in_channels, height // 8, width // 8),
         generator=generator,
         dtype=torch.float32,
-        device=device,
     )
+    latents.to(device)
 
     scheduler.set_timesteps(num_inference_steps)
     latents = latents * scheduler.init_noise_sigma
