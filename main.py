@@ -92,7 +92,7 @@ def main():
         latents = scheduler.step(noise_pred, t, latents).prev_sample
 
     end_time = time.perf_counter()
-    print(f"Time taken for {num_inference_steps}: {end_time-start_time} seconds")
+    print(f"Time taken for {num_inference_steps} steps: {end_time-start_time} seconds")
 
     # scale and decode the image latents with vae
     latents = 1 / 0.18215 * latents
