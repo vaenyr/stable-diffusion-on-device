@@ -11,18 +11,16 @@ logging.basicConfig(level=logging.DEBUG if debug else logging.INFO)
 dlcc = DLCCompiler()
 
 models_folder = Path('/home/SERILOCAL/l.dudziak/dev/generative/stable-diffusion/onnx')
-parts = [
-    'sd_unet_inputs.onnx',
-    'sd_unet_middle.onnx',
-    'sd_unet_outputs.onnx',
-    'sd_unet_head.onnx',
-]
+output_folder = Path(__file__).parent.joinpath('dlc')
+output_folder.mkdir(parents=True, exist_ok=True)
 
 with dlcc.keepfiles(debug):
-    for part in parts:
-        onnx_file = models_folder / part
-        dlc_fp32 = onnx_file.with_suffix('.dlc')
-        dlc_int8 = onnx_file.with_suffix('.int8.dlc')
+    for onnx_file in models_folder.rglob('*.onnx'):
+        part = onnx_file.relative_to(models_folder)
+
+        dlc_fp32 = output_folder.joinpath(part).with_suffix('.dlc')
+        dlc_int8 = dlc_fp32.with_suffix('.int8.dlc')
+        dlc_fp32.parent.mkdir(parents=True, exist_ok=True)
         if not onnx_file.exists():
             print('Error: source model file does not exist!', onnx_file)
             continue
