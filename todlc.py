@@ -12,6 +12,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--debug', action='store_true')
 parser.add_argument('--regex', type=str, default=None)
 parser.add_argument('--force', action='store_true')
+parser.add_argument('--path', type=str, default=str(Path(__file__).parents[1].joinpath('stable-diffusion', 'onnx')))
 
 args = parser.parse_args()
 
@@ -25,7 +26,7 @@ logging.basicConfig(level=logging.DEBUG if debug else logging.INFO)
 
 dlcc = DLCCompiler()
 
-models_folder = Path('/home/SERILOCAL/l.dudziak/dev/generative/stable-diffusion/onnx')
+models_folder = Path(args.path)
 output_folder = Path(__file__).parent.joinpath('dlc')
 output_folder.mkdir(parents=True, exist_ok=True)
 
@@ -48,7 +49,7 @@ with dlcc.keepfiles(debug):
             print('Attempting ONNX -> DLC (fp32) conversion for part:', part)
             try:
                 dlcc.compile(onnx_file, model_type='onnx-file', output_file=dlc_fp32)
-            except:
+            except Exception:
                 print('Error occurred! Model will be skipped!')
                 import traceback
                 traceback.print_exc()
@@ -58,7 +59,7 @@ with dlcc.keepfiles(debug):
             print('Attempting DLC (fp32) -> DLC (int8) quantization for part:', part)
             try:
                 dlcc.quantize(dlc_fp32, precision=8, output_file=dlc_int8)
-            except:
+            except Exception:
                 print('Error occurred! Model will be skipped!')
                 import traceback
                 traceback.print_exc()

@@ -52,7 +52,7 @@ for qmodel in candidates:
     try:
         print(f'Running {part}... ', end='', flush=True)
         result = bench.run(qmodel, convert=False)
-    except:
+    except Exception:
         print('Error')
         failed_models.append(part)
         import traceback
