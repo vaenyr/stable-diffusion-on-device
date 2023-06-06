@@ -52,8 +52,6 @@ def convert_onnx(onnx_file):
             traceback.print_exc()
             return
 
-    print('waiting...')
-    input()
     if not dlc_int8.exists() or args.force:
         print('Attempting DLC (fp32) -> DLC (int8) quantization for part:', part)
         try:
@@ -80,8 +78,7 @@ with dlcc.keepfiles(debug):
                     if not regex.search(str(onnx_file)):
                         continue
 
-                #jobs.append(pool.submit(convert_onnx, onnx_file))
-                convert_onnx(onnx_file)
+                jobs.append(pool.submit(convert_onnx, onnx_file))
 
             wait(jobs)
         finally:
