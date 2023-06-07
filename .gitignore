@@ -1,2 +1,5 @@
 dlc/
 results/
+*.pyc
+__pycache__
+*.egg-info
