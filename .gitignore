@@ -3,3 +3,6 @@ results/
 *.pyc
 __pycache__
 *.egg-info
+obj/
+libs/
+sdod/csrc/GroupNormPackage

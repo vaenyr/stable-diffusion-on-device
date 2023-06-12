@@ -6,18 +6,46 @@ from functools import reduce
 import operator as op
 
 
+class EfficientGNFun(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, input, num_groups, weight=None, bias=None, eps=1e-5):
+        return F.group_norm(input, num_groups, weight, bias, eps)
+
+    @torch.onnx.symbolic_helper.quantized_args(True, False, False, False)
+    @torch.onnx.symbolic_helper.parse_args("v", "i", "v", "v", "f")
+    @staticmethod
+    def symbolic(g: torch.Graph, input, num_groups, weight, bias, eps):
+        if weight is None or torch.onnx.symbolic_helper._is_none(weight):
+            assert bias is None or torch.onnx.symbolic_helper._is_none(bias)
+            ret = g.op('sdod::ParameterlessGroupNorm', input, num_groups_i=num_groups, eps_f=eps)
+        else:
+            assert bias is not None and not torch.onnx.symbolic_helper._is_none(bias)
+            ret = g.op('sdod::GroupNorm', input, weight, bias, num_groups_i=num_groups, eps_f=eps)
+
+        ret.setType(input.type())
+        return ret
+
+
+def efficient_group_norm(input, num_groups, weight=None, bias=None, eps=1e-5):
+    return EfficientGNFun.apply(input, num_groups, weight, bias, eps)
+
+torch.onnx.register_custom_op_symbolic
+
+
 class EfficientGN(nn.Module):
-    def __init__(self, num_groups: int, num_channels: int, eps: float = 1e-5, affine: bool = True, device=None, dtype=None, bn=False) -> None:
+    def __init__(self, num_groups: int, num_channels: int, eps: float = 1e-5, affine: bool = True, device=None, dtype=None, impl=None) -> None:
         factory_kwargs = {'device': device, 'dtype': dtype}
         super().__init__()
         if num_channels % num_groups != 0:
             raise ValueError('num_channels must be divisible by num_groups')
+        if impl not in [None, 'eff', 'ln', 'bn']:
+            raise ValueError('EfficientGN impl parameter should be one of None, "eff", "ln" or "bn"')
 
         self.num_groups = num_groups
         self.num_channels = num_channels
         self.eps = eps
         self.affine = affine
-        self.bn = bn
+        self.impl = impl
         if self.affine:
             self.weight = nn.Parameter(torch.empty(num_channels, **factory_kwargs))
             self.bias = nn.Parameter(torch.empty(num_channels, **factory_kwargs))
@@ -37,19 +65,27 @@ class EfficientGN(nn.Module):
         assert shape[1] == self.num_channels
         channels_per_group = self.num_channels // self.num_groups
         spatial = reduce(op.mul, shape[2:], 1)
-        input = input.reshape(shape[0] * self.num_groups, channels_per_group, spatial)
 
-        if self.bn:
+        if self.impl is None:
+            return F.group_norm(input, self.num_groups, self.weight, self.bias, self.eps)
+        elif self.impl == 'eff':
+            return efficient_group_norm(input, self.num_groups, self.weight, self.bias, self.eps)
+        elif self.impl == 'bn':
+            input = input.reshape(shape[0] * self.num_groups, channels_per_group, spatial)
             mean = input.mean(dim=(1,2), keepdim=True)
             var = ((input-mean)**2).mean(dim=(1,2))
             input = input.permute(1, 0, 2)
             input = F.batch_norm(input, mean.squeeze(), var.squeeze(), None, None, training=False, momentum=0, eps=self.eps)
             input = input.permute(1, 0, 2)
+            input = input.reshape(shape[0], self.num_channels, *shape[2:])
+        elif self.impl == 'ln':
+            input = input.reshape(shape[0], self.num_groups, channels_per_group*spatial)
+            input = F.layer_norm(input, (channels_per_group*spatial, ), torch.ones_like(input[0,0]), torch.zeros_like(input[0,0]), eps=self.eps)
+            input = input.reshape(shape[0], self.num_channels, *shape[2:])
         else:
-            input = F.layer_norm(input, (channels_per_group, spatial, ), None, None, self.eps)
+            raise NotImplementedError(self.impl)
 
-        input = input.reshape(shape[0], self.num_channels, *shape[2:])
-        if self.affine:
+        if self.impl not in [None, 'eff'] and self.affine:
             input = input * self.weight.reshape(1, self.num_channels, *tuple(1 for _ in shape[2:])) + self.bias.reshape(1, self.num_channels, *tuple(1 for _ in shape[2:]))
         return input
 

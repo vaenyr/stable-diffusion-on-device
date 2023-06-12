@@ -15,6 +15,7 @@ parser.add_argument('--debug', action='store_true')
 parser.add_argument('--regex', type=str, default=None)
 parser.add_argument('--force', action='store_true')
 parser.add_argument('--path', type=str, default=str(Path(__file__).absolute().parents[1].joinpath('stable-diffusion', 'onnx')))
+parser.add_argument('--ts', action='store_true', help='Convert via torchscript rather than onnx. NOTE: Torchscript conversion still relies on ONNX files to determine input shapes, therefore both .pt and .onnx files are needed.')
 
 args = parser.parse_args()
 
@@ -35,24 +36,47 @@ output_folder.mkdir(parents=True, exist_ok=True)
 
 def convert_onnx(onnx_file):
     part = onnx_file.relative_to(models_folder)
+    ts_file = onnx_file.with_suffix('.pt')
     dlc_fp32 = output_folder.joinpath(part).with_suffix('.dlc')
     dlc_int8 = dlc_fp32.with_suffix('.int8.dlc')
     dlc_fp32.parent.mkdir(parents=True, exist_ok=True)
-    if not onnx_file.exists():
-        print('Error: source model file does not exist!', onnx_file)
+
+    source_file = onnx_file if not args.ts else ts_file
+    source_type = 'onnx-file' if not args.ts else 'torchscript-file'
+    extra_args = {}
+
+    if not source_file.exists():
+        print('Error: source model file does not exist!', source_file)
         return
 
-    if not dlc_fp32.exists() or args.force:
-        print('Attempting ONNX -> DLC (fp32) conversion for part:', part)
+    if args.ts:
+        if not onnx_file.exists():
+            print('Error: onnx file does not exist! It is needed to determine input shape!', onnx_file)
+            return
+
+        import onnx
+        _onnx_model = onnx.load(onnx_file, load_external_data=False)
+        extra_args['input_sizes'] = []
+        for inp in _onnx_model.graph.input:
+            sh = list(d.dim_value for d in inp.type.tensor_type.shape.dim)
+            extra_args['input_sizes'].append(sh)
+
+    if args.force and dlc_fp32.exists():
+        dlc_fp32.unlink()
+    if args.force and dlc_int8.exists():
+        dlc_int8.unlink()
+
+    if not dlc_fp32.exists():
+        print(f'Attempting {"ONNX" if not args.ts else "TorchScript"} -> DLC (fp32) conversion for part:', part)
         try:
-            dlcc.compile(onnx_file, model_type='onnx-file', output_file=dlc_fp32)
+            dlcc.compile(source_file, model_type=source_type, output_file=dlc_fp32, udos='config/group_norm.json', **extra_args)
         except Exception:
             print('Error occurred while converting! Model will be skipped!', part)
             import traceback
             traceback.print_exc()
             return
 
-    if not dlc_int8.exists() or args.force:
+    if not dlc_int8.exists():
         print('Attempting DLC (fp32) -> DLC (int8) quantization for part:', part)
         try:
             dlcc.quantize(dlc_fp32, precision=8, output_file=dlc_int8)
