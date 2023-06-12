@@ -1,0 +1,13 @@
+diff --git a/lib/python/qti/aisw/converters/backend/custom_ops/core.py.bak b/lib/python/qti/aisw/converters/backend/custom_ops/core.py
+index 5361398..785ead3 100644
+--- a/lib/python/qti/aisw/converters/backend/custom_ops/core.py.bak
++++ b/lib/python/qti/aisw/converters/backend/custom_ops/core.py
+@@ -77,7 +77,7 @@ class TensorInfo(CustomTensorInfo):
+                     tensor_info.allowed_data_types.append("SNPE_UDO_DATATYPE_FLOAT_32")
+             else:
+                 per_core_dict = get_per_core_data_types(tensor.get("per_core_data_types"))
+-                tensor_info.allowed_data_types = list(per_core_dict.keys())
++                tensor_info.allowed_data_types = list(per_core_dict.values())
+                 if "SNPE_UDO_CORETYPE_CPU" in per_core_dict:
+                     # if a core type has been defined for CPU explicitly, the default
+                     # datatype should be changed

@@ -11,16 +11,16 @@ class EfficientGNFun(torch.autograd.Function):
     def forward(ctx, input, num_groups, weight=None, bias=None, eps=1e-5):
         return F.group_norm(input, num_groups, weight, bias, eps)
 
+    @staticmethod
     @torch.onnx.symbolic_helper.quantized_args(True, False, False, False)
     @torch.onnx.symbolic_helper.parse_args("v", "i", "v", "v", "f")
-    @staticmethod
     def symbolic(g: torch.Graph, input, num_groups, weight, bias, eps):
         if weight is None or torch.onnx.symbolic_helper._is_none(weight):
             assert bias is None or torch.onnx.symbolic_helper._is_none(bias)
             ret = g.op('sdod::ParameterlessGroupNorm', input, num_groups_i=num_groups, eps_f=eps)
         else:
             assert bias is not None and not torch.onnx.symbolic_helper._is_none(bias)
-            ret = g.op('sdod::GroupNorm', input, weight, bias, num_groups_i=num_groups, eps_f=eps)
+            ret = g.op('sdod::GroupNorm', input)
 
         ret.setType(input.type())
         return ret
@@ -28,8 +28,6 @@ class EfficientGNFun(torch.autograd.Function):
 
 def efficient_group_norm(input, num_groups, weight=None, bias=None, eps=1e-5):
     return EfficientGNFun.apply(input, num_groups, weight, bias, eps)
-
-torch.onnx.register_custom_op_symbolic
 
 
 class EfficientGN(nn.Module):

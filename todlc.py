@@ -16,6 +16,7 @@ parser.add_argument('--regex', type=str, default=None)
 parser.add_argument('--force', action='store_true')
 parser.add_argument('--path', type=str, default=str(Path(__file__).absolute().parents[1].joinpath('stable-diffusion', 'onnx')))
 parser.add_argument('--ts', action='store_true', help='Convert via torchscript rather than onnx. NOTE: Torchscript conversion still relies on ONNX files to determine input shapes, therefore both .pt and .onnx files are needed.')
+parser.add_argument('--group_norm', action='store_true')
 
 args = parser.parse_args()
 
@@ -61,6 +62,9 @@ def convert_onnx(onnx_file):
             sh = list(d.dim_value for d in inp.type.tensor_type.shape.dim)
             extra_args['input_sizes'].append(sh)
 
+    if args.group_norm:
+        extra_args['udos'] = 'config/group_norm.json'
+
     if args.force and dlc_fp32.exists():
         dlc_fp32.unlink()
     if args.force and dlc_int8.exists():
@@ -69,7 +73,7 @@ def convert_onnx(onnx_file):
     if not dlc_fp32.exists():
         print(f'Attempting {"ONNX" if not args.ts else "TorchScript"} -> DLC (fp32) conversion for part:', part)
         try:
-            dlcc.compile(source_file, model_type=source_type, output_file=dlc_fp32, udos='config/group_norm.json', **extra_args)
+            dlcc.compile(source_file, model_type=source_type, output_file=dlc_fp32, **extra_args)
         except Exception:
             print('Error occurred while converting! Model will be skipped!', part)
             import traceback

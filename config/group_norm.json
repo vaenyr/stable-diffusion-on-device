@@ -5,16 +5,10 @@
             {
                 "type": "GroupNorm",
                 "inputs":[
-                    { "name": "input", "per_core_data_types": { "CPU": "FLOAT_32", "DSP": "UINT_8" }, "tensor_layout": "NHWC", "quantization_mode": "TF" },
-                    { "name": "weight", "per_core_data_types": { "CPU": "FLOAT_32", "DSP": "UINT_8" }, "static": true, "default_value": [1.0], "quantization_mode": "TF" },
-                    { "name": "bias", "per_core_data_types": { "CPU": "FLOAT_32", "DSP": "UINT_8" }, "static": true, "default_value": [0.0], "quantization_mode": "TF" }
+                    { "name": "", "per_core_data_types": { "CPU": "FLOAT_32", "DSP": "UINT_8" } }
                 ],
                 "outputs":[
-                    { "name": "output", "per_core_data_types": { "CPU": "FLOAT_32", "DSP": "UINT_8" }, "tensor_layout": "NHWC" }
-                ],
-                "scalar_params": [
-                    { "name": "num_groups", "data_type": "UINT_32" },
-                    { "name": "eps", "data_type": "FLOAT_32", "default_value": 1e-05 }
+                    { "name": "", "per_core_data_types": { "CPU": "FLOAT_32", "DSP": "UINT_8" } }
                 ],
                 "core_types": ["CPU","DSP"],
                 "dsp_arch_types": ["v73"]
