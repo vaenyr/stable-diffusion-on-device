@@ -64,7 +64,7 @@ if [[ $run == 1 ]]; then
     SNPE_UDO_ROOT=$SNPE_ROOT/share/SnpeUdo \
         LD_LIBRARY_PATH=$SNPE_ROOT/lib/x86_64-linux-clang:$LD_LIBRARY_PATH:$(dirname $SNPE_PYTHON)/../lib \
         PYTHONPATH=$SNPE_ROOT/lib/python:$PYTHONPATH \
-        $SNPE_PYTHON $(which snpe-udo-package-generator) -p config/group_norm.json -o sdod/csrc/
+        $SNPE_PYTHON $(which snpe-udo-package-generator) -c -p config/group_norm.json -o sdod/csrc/
 
     # fix for gentoo...
     is_utils_linux_rename=$(rename --help | grep -o "<replacement>")
@@ -78,13 +78,14 @@ if [[ $run == 1 ]]; then
     fi
 
     cp sdod/csrc/GroupNormCpuImpl.cpp sdod/csrc/GroupNormPackage/jni/src/CPU/src/ops/GroupNorm.cpp
-    cp sdod/csrc/GroupNormCpuValidation.cpp sdod/csrc/GroupNormPackage/jni/src/reg/GroupNormPackageCpuImplValidationFunctions.cpp
-    cp sdod/csrc/GroupNormDspV73Impl.cpp sdod/csrc/GroupNormPackage/jni/src/DSP_V73/GroupNormImplLibDsp.cpp
-    cp sdod/csrc/GroupNormDspV73Validation.cpp sdod/csrc/GroupNormPackage/jni/src/reg/GroupNormPackageDspImplValidationFunctions.cpp
+    # cp sdod/csrc/GroupNormCpuValidation.cpp sdod/csrc/GroupNormPackage/jni/src/reg/GroupNormPackageCpuImplValidationFunctions.cpp
+    # cp sdod/csrc/GroupNormDspV73Impl.cpp sdod/csrc/GroupNormPackage/jni/src/DSP_V73/GroupNormImplLibDsp.cpp
+    # cp sdod/csrc/GroupNormDspV73Validation.cpp sdod/csrc/GroupNormPackage/jni/src/reg/GroupNormPackageDspImplValidationFunctions.cpp
 
 
     pushd sdod/csrc/GroupNormPackage >/dev/null 2>&1 && {
-        make cpu_x86
+        QNN_DEBUG_ENABLE=1 make cpu_x86
+        QNN_DEBUG_ENABLE=1 make cpu_android PLATFORM=arm64-v8a
     popd >/dev/null 2>&1
     }
 fi

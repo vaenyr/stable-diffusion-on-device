@@ -24,7 +24,7 @@ if regex:
 logging.basicConfig(level=logging.DEBUG if debug else logging.INFO)
 
 
-bench = snpe.SnpeBenchmark(devices=['S23', 'S23+', 'S23 Ultra'], runtime='dsp', quantize=8)
+bench = snpe.SnpeBenchmark(devices=['S23', 'S23+', 'S23 Ultra'], runtime='dsp', quantize=8, warmup=20, iters=100)
 
 dlc_folder = Path(__file__).parent.joinpath('dlc')
 results_folder = Path(__file__).parent.joinpath('results')

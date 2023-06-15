@@ -29,4 +29,10 @@ with torch.no_grad():
         buff.seek(0)
         g = onnx.load(buff).graph
 
+
+
 print(onnx.helper.printable_graph(g))
+
+buff.seek(0)
+with open('../stable-diffusion/onnx/gn.onnx', 'wb') as f:
+    f.write(buff.getvalue())

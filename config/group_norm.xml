@@ -1,0 +1,149 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+Copyright (c) 2020 Qualcomm Technologies, Inc.
+All Rights Reserved.
+Confidential and Proprietary - Qualcomm Technologies, Inc.
+-->
+<OpDefCollection
+        PackageName="GroupNormPackage"
+        Domain="sdod"
+        Version="1.0"
+>
+    <OpDefList>
+        
+
+        <!--Conv2D-->
+        <OpDef>
+            <Name>GroupNorm</Name>
+            <Description>
+                <Content>
+                    Group normalization.
+                </Content>
+            </Description>
+            <Reference Source="PyTorch"
+                       Url="https://pytorch.org/docs/stable/generated/torch.nn.GroupNorm.html"/>
+            <Input>
+                <Name>in[0]</Name>
+                <Description>
+                    <Content>input activation</Content>
+                </Description>
+                <Mandatory>true</Mandatory>
+                <Datatype>BACKEND_SPECIFIC</Datatype>
+                <Shape>
+                    <Rank>4D</Rank>
+                    <Layout>NCHW</Layout>
+                    <Text>[batch, channels, height, width]</Text>
+                </Shape>
+            </Input>
+
+            <Input>
+                <Name>weight</Name>
+                <Description>
+                    <Content>learnable multiplicative parameters</Content>
+                </Description>
+                <Mandatory>true</Mandatory>
+                <Datatype>BACKEND_SPECIFIC</Datatype>
+                <Shape>
+                    <Rank>1D</Rank>
+                    <Text>[channels]</Text>
+                </Shape>
+                <IsStaticTensor>true</IsStaticTensor>
+            </Input>
+
+            <Input>
+                <Name>bias</Name>
+                <Description>
+                    <Content>learnable additive parameters</Content>
+                </Description>
+                <Mandatory>true</Mandatory>
+                <Datatype>BACKEND_SPECIFIC</Datatype>
+                <Shape>
+                    <Rank>1D</Rank>
+                    <Text>[channels]</Text>
+                </Shape>
+                <IsStaticTensor>true</IsStaticTensor>
+            </Input>
+
+            <Output>
+                <Name>out[0]</Name>
+                <Description>
+                    <Content>Normalized output.</Content>
+                </Description>
+                <Mandatory>true</Mandatory>
+                <Datatype>BACKEND_SPECIFIC</Datatype>
+                <Shape>
+                    <Rank>4D</Rank>
+                    <Layout>NCHW</Layout>
+                    <Text>[batch, channels, height, width]</Text>
+                </Shape>
+            </Output>
+
+            <Parameter>
+                <Name>num_groups</Name>
+                <Description>
+                    <Content>Number of groups over which to perform normalization.</Content>
+                </Description>
+                <Mandatory>true</Mandatory>
+                <Datatype>QNN_DATATYPE_UINT_32</Datatype>
+                <Shape>
+                    <Rank>SCALAR</Rank>
+                </Shape>
+            </Parameter>
+
+            <Parameter>
+                <Name>eps</Name>
+                <Description>
+                    <Content>epsilon to add to the denominator.</Content>
+                </Description>
+                <Mandatory>false</Mandatory>
+                <Datatype>QNN_DATATYPE_FLOAT_32</Datatype>
+                <Shape>
+                    <Rank>SCALAR</Rank>
+                </Shape>
+                <Default>1</Default>
+            </Parameter>
+
+            <SupportedBackend>CPU</SupportedBackend>
+        </OpDef>
+    </OpDefList>
+
+    <SupplementalOpDefList Backend="CPU">
+        <SupportedOps>
+            <OpName>GroupNorm</OpName>
+        </SupportedOps>
+
+        <!--Conv2D-->
+        <SupplementalOpDef>
+            <Name>GroupNorm</Name>
+
+            <Input>
+                <Name>in[0]</Name>
+                <Datatype>QNN_DATATYPE_FLOAT_32</Datatype>
+                <Datatype>QNN_DATATYPE_UFIXED_POINT_8</Datatype>
+                <Datatype>QNN_DATATYPE_UFIXED_POINT_16</Datatype>
+            </Input>
+
+            <Input>
+                <Name>weight</Name>
+                <Datatype>QNN_DATATYPE_FLOAT_32</Datatype>
+                <Datatype>QNN_DATATYPE_UFIXED_POINT_8</Datatype>
+                <Datatype>QNN_DATATYPE_UFIXED_POINT_16</Datatype>
+            </Input>
+
+            <Input>
+                <Name>bias</Name>
+                <Datatype>QNN_DATATYPE_FLOAT_32</Datatype>
+                <Datatype>QNN_DATATYPE_UFIXED_POINT_8</Datatype>
+                <Datatype>QNN_DATATYPE_UFIXED_POINT_16</Datatype>
+                <Datatype>QNN_DATATYPE_SFIXED_POINT_32</Datatype>
+            </Input>
+
+            <Output>
+                <Name>out[0]</Name>
+                <Datatype>QNN_DATATYPE_FLOAT_32</Datatype>
+                <Datatype>QNN_DATATYPE_UFIXED_POINT_8</Datatype>
+                <Datatype>QNN_DATATYPE_UFIXED_POINT_16</Datatype>
+            </Output>
+        </SupplementalOpDef>
+    </SupplementalOpDefList>
+</OpDefCollection>

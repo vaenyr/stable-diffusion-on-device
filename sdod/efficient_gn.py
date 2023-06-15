@@ -20,7 +20,7 @@ class EfficientGNFun(torch.autograd.Function):
             ret = g.op('sdod::ParameterlessGroupNorm', input, num_groups_i=num_groups, eps_f=eps)
         else:
             assert bias is not None and not torch.onnx.symbolic_helper._is_none(bias)
-            ret = g.op('sdod::GroupNorm', input)
+            ret = g.op('sdod::GroupNorm', input, weight, bias, num_groups_i=num_groups, eps_f=eps)
 
         ret.setType(input.type())
         return ret
@@ -70,10 +70,8 @@ class EfficientGN(nn.Module):
             return efficient_group_norm(input, self.num_groups, self.weight, self.bias, self.eps)
         elif self.impl == 'bn':
             input = input.reshape(shape[0] * self.num_groups, channels_per_group, spatial)
-            mean = input.mean(dim=(1,2), keepdim=True)
-            var = ((input-mean)**2).mean(dim=(1,2))
             input = input.permute(1, 0, 2)
-            input = F.batch_norm(input, mean.squeeze(), var.squeeze(), None, None, training=False, momentum=0, eps=self.eps)
+            input = F.batch_norm(input, torch.zeros(shape[0] * self.num_groups, dtype=input.dtype, device=input.device), torch.ones(shape[0] * self.num_groups, dtype=input.dtype, device=input.device), None, None, training=False, momentum=0, eps=self.eps)
             input = input.permute(1, 0, 2)
             input = input.reshape(shape[0], self.num_channels, *shape[2:])
         elif self.impl == 'ln':
@@ -83,8 +81,8 @@ class EfficientGN(nn.Module):
         else:
             raise NotImplementedError(self.impl)
 
-        if self.impl not in [None, 'eff'] and self.affine:
-            input = input * self.weight.reshape(1, self.num_channels, *tuple(1 for _ in shape[2:])) + self.bias.reshape(1, self.num_channels, *tuple(1 for _ in shape[2:]))
+        # if self.impl not in [None, 'eff'] and self.affine:
+        #     input = input * self.weight.reshape(1, self.num_channels, *tuple(1 for _ in shape[2:])) + self.bias.reshape(1, self.num_channels, *tuple(1 for _ in shape[2:]))
         return input
 
     def extra_repr(self) -> str:

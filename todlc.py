@@ -63,7 +63,9 @@ def convert_onnx(onnx_file):
             extra_args['input_sizes'].append(sh)
 
     if args.group_norm:
-        extra_args['udos'] = 'config/group_norm.json'
+        # extra_args['extra_tool_args'] = ['--op_package_lib', 'sdod/csrc/GroupNormPackage/libs/x86_64-linux-clang/libGroupNormPackage.so:GroupNormPackageInterfaceProvider']
+        # extra_args['extra_tool_args'] = ['--op_package_config', 'config/group_norm.xml']
+        extra_args['udosGroupNormPackage'] = 'config/group_norm.json'
 
     if args.force and dlc_fp32.exists():
         dlc_fp32.unlink()
