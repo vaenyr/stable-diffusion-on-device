@@ -1,0 +1,24 @@
+name: snpe
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - onnx=1.6.0
+  - python=3.6.13
+  - pip:
+      - attrs==22.2.0
+      - decorator==5.1.1
+      - mako==1.1.6
+      - numpy==1.18.5
+      - onnx-simplifier==0.4.10
+      - pandas==1.1.5
+      - pillow==8.4.0
+      - pytest==7.0.1
+      - pyyaml==6.0
+      - requests==2.27.1
+      - scipy==1.4.1
+      - tensorflow==2.3.0
+      - torch==1.10.1
+      - torchaudio==0.10.1
+      - torchvision==0.11.2
+      - typing-extensions==4.1.1
