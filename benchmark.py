@@ -76,6 +76,8 @@ with bench.async_context():
                 import traceback
                 with error_file.open('w') as f:
                     traceback.print_exc(file=f)
+                    if debug:
+                        traceback.print_exc()
             else:
                 print(part, 'Success', result['latency'])
                 ok_models.append(part)
