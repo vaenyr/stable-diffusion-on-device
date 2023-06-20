@@ -11,11 +11,17 @@ from natsort import natsorted
 parser = argparse.ArgumentParser()
 parser.add_argument('--debug', action='store_true')
 parser.add_argument('--regex', type=str, default=None)
+parser.add_argument('--qnn', action='store_true')
+parser.add_argument('--op_summary', action='store_true')
 
 args = parser.parse_args()
 
 
 def determine_op_type(name):
+    if args.qnn:
+        name = name.replace('__', '_')
+        name = name.replace('_', '/')
+
     if name == '/0/op/Conv':
         return 'conv'
     if name.startswith('gelu_'):
@@ -97,10 +103,16 @@ results_folder = Path(__file__).parent.joinpath('results')
 latency_by_type = {}
 total_by_type = 0
 total_latency = 0
+total_ops = 0
+
+if args.qnn:
+    pattern = '*.qnn.txt'
+else:
+    pattern = '*.snpe.txt'
 
 ok_models = []
 failed_models = []
-candidates = natsorted(results_folder.rglob('*.txt'), key=lambda p: f'_{str(p).count(os.path.sep)}{str(p)}')
+candidates = natsorted(results_folder.rglob(pattern), key=lambda p: f'_{str(p).count(os.path.sep)}{str(p)}')
 for results in candidates:
     if regex:
         if not regex.search(str(results)):
@@ -122,11 +134,15 @@ for results in candidates:
     print()
 
     for name, latency in results:
-        t = determine_op_type(name)
-        latency_by_type.setdefault(t, 0)
-        latency_by_type[t] += latency
-        total_by_type += latency
+        total_ops += latency
+        if args.op_summary:
+            t = determine_op_type(name)
+            latency_by_type.setdefault(t, 0)
+            latency_by_type[t] += latency
+            total_by_type += latency
 
-latency_by_type = sorted([(key, value, round(value/total_by_type*100, 2), round(value/total_by_type * total_latency, 4)) for key, value in latency_by_type.items()], key=lambda p: p[1], reverse=True)
-print(tabulate(latency_by_type, headers=['Op.', 'Cycles', '% Cycles', 'Approx. latency']))
+if args.op_summary:
+    latency_by_type = sorted([(key, value, round(value/total_by_type*100, 2), round(value/total_by_type * total_latency, 4)) for key, value in latency_by_type.items()], key=lambda p: p[1], reverse=True)
+    print(tabulate(latency_by_type, headers=['Op.', 'Cycles', '% Cycles', 'Approx. latency']))
+print('Total latency of operations:', total_ops)
 print('Total latency (ms):', total_latency)

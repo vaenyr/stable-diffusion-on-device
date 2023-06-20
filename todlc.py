@@ -9,6 +9,7 @@ from concurrent.futures import ThreadPoolExecutor, wait
 from natsort import natsorted
 
 from autocaml.validators.snpe.dlc_compiler import DLCCompiler
+from autocaml.validators.qnn.qnn_compiler import QnnCompiler
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--debug', action='store_true')
@@ -17,6 +18,7 @@ parser.add_argument('--force', action='store_true')
 parser.add_argument('--path', type=str, default=str(Path(__file__).absolute().parents[1].joinpath('stable-diffusion', 'onnx')))
 parser.add_argument('--ts', action='store_true', help='Convert via torchscript rather than onnx. NOTE: Torchscript conversion still relies on ONNX files to determine input shapes, therefore both .pt and .onnx files are needed.')
 parser.add_argument('--group_norm', action='store_true')
+parser.add_argument('--qnn', action='store_true', help='Convert to QNN .so model libraries instead of SNPE .dlc')
 
 args = parser.parse_args()
 
@@ -28,7 +30,10 @@ if regex:
 logging.basicConfig(level=logging.DEBUG if debug else logging.INFO)
 
 
-dlcc = DLCCompiler()
+if args.qnn:
+    cc = QnnCompiler()
+else:
+    cc = DLCCompiler()
 
 models_folder = Path(args.path)
 output_folder = Path(__file__).parent.joinpath('dlc')
@@ -38,9 +43,15 @@ output_folder.mkdir(parents=True, exist_ok=True)
 def convert_onnx(onnx_file):
     part = onnx_file.relative_to(models_folder)
     ts_file = onnx_file.with_suffix('.pt')
-    dlc_fp32 = output_folder.joinpath(part).with_suffix('.dlc')
-    dlc_int8 = dlc_fp32.with_suffix('.int8.dlc')
-    dlc_fp32.parent.mkdir(parents=True, exist_ok=True)
+
+    if args.qnn:
+        int_target = None
+        target = output_folder.joinpath(part).with_suffix('.qnn.so')
+    else:
+        int_target = output_folder.joinpath(part).with_suffix('.dlc')
+        target = int_target.with_suffix('.int8.dlc')
+
+    target.parent.mkdir(parents=True, exist_ok=True)
 
     source_file = onnx_file if not args.ts else ts_file
     source_type = 'onnx-file' if not args.ts else 'torchscript-file'
@@ -67,38 +78,42 @@ def convert_onnx(onnx_file):
         # extra_args['extra_tool_args'] = ['--op_package_config', 'config/group_norm.xml']
         extra_args['udosGroupNormPackage'] = 'config/group_norm.json'
 
-    if args.force and dlc_fp32.exists():
-        dlc_fp32.unlink()
-    if args.force and dlc_int8.exists():
-        dlc_int8.unlink()
+    if args.force and target.exists():
+        target.unlink()
+    if int_target is not None and args.force and int_target.exists():
+        int_target.unlink()
 
-    if not dlc_fp32.exists():
+    if int_target is not None and not int_target.exists():
+        assert not args.qnn, 'Intermediate target is only expected for DLC path'
         print(f'Attempting {"ONNX" if not args.ts else "TorchScript"} -> DLC (fp32) conversion for part:', part)
         try:
-            dlcc.compile(source_file, model_type=source_type, output_file=dlc_fp32, **extra_args)
+            cc.compile(source_file, model_type=source_type, output_file=int_target, **extra_args)
         except Exception:
             print('Error occurred while converting! Model will be skipped!', part)
             import traceback
             traceback.print_exc()
             return
 
-    if not dlc_int8.exists():
-        print('Attempting DLC (fp32) -> DLC (int8) quantization for part:', part)
+    if not target.exists():
+        print(f'Attempting {("ONNX" if not args.ts else "TorchScript") if args.qnn else "DLC (fp32)"} -> {"QNN model library conversion" if args.qnn else "DLC (int8) quantization"} for part:', part)
         try:
-            dlcc.quantize(dlc_fp32, precision=8, output_file=dlc_int8)
+            if args.qnn:
+                cc.compile(source_file, model_type=source_type, output_file=target, quantize=8, **extra_args)
+            else:
+                cc.quantize(int_target, precision=8, output_file=target)
         except Exception:
-            print('Error occurred while quantizing! Model will be skipped!', part)
+            print(f'Error occurred while {"converting" if args.qnn else "quantizing"}! Model will be skipped!', part)
             import traceback
             traceback.print_exc()
             return
 
-    if dlc_int8.exists():
+    if target.exists():
         print('Model successfully converted and quantized!', part)
     else:
-        print('No error has been reported but quantized model file does not exist! Check logs.', part)
+        print('No error has been reported but the final file does not exist! Check logs.', part)
 
 
-with dlcc.keepfiles(debug):
+with cc.keepfiles(debug):
     with ThreadPoolExecutor(max_workers=multiprocessing.cpu_count()) as pool:
         try:
             candidates = natsorted(models_folder.rglob('*.onnx'), key=lambda p: f'_{str(p).count(os.path.sep)}{str(p)}')

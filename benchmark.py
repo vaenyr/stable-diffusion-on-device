@@ -8,11 +8,12 @@ from pprint import pprint
 from natsort import natsorted
 
 import autocaml.validators.snpe as snpe
+import autocaml.validators.qnn as qnn
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--debug', action='store_true')
 parser.add_argument('--regex', type=str, default=None)
-parser.add_argument('--force', action='store_true')
+parser.add_argument('--qnn', action='store_true')
 
 args = parser.parse_args()
 
@@ -21,10 +22,17 @@ regex = args.regex
 if regex:
     regex = re.compile(regex)
 
-logging.basicConfig(level=logging.DEBUG if debug else logging.INFO)
+logging.basicConfig(level=logging.DEBUG-10 if debug else logging.INFO)
 
 
-bench = snpe.SnpeBenchmark(devices=['S23', 'S23+', 'S23 Ultra'], runtime='dsp', quantize=8, warmup=20, iters=100)
+if args.qnn:
+    bench = qnn.QnnBenchmark(devices=['S23', 'S23+', 'S23 Ultra'], runtime='htp', quantize=8, warmup=20, iters=100)
+    file_pattern = '*.qnn.so'
+    result_suffix = '.qnn.txt'
+else:
+    bench = snpe.SnpeBenchmark(devices=['S23', 'S23+', 'S23 Ultra'], runtime='dsp', quantize=8, warmup=20, iters=100)
+    file_pattern = '*.int8.dlc'
+    result_suffix = '.snpe.txt'
 
 dlc_folder = Path(__file__).parent.joinpath('dlc')
 results_folder = Path(__file__).parent.joinpath('results')
@@ -34,7 +42,7 @@ failed_models = []
 total = 0
 
 
-candidates = natsorted(dlc_folder.rglob('*.int8.dlc'), key=lambda p: f'_{str(p).count(os.path.sep)}{str(p)}') # prefer less nested files first by appending a number of "/" in the path at the beginning
+candidates = natsorted(dlc_folder.rglob(file_pattern), key=lambda p: f'_{str(p).count(os.path.sep)}{str(p)}') # prefer less nested files first by appending a number of "/" in the path at the beginning
 with bench.async_context():
     jobs = []
     for qmodel in candidates:
@@ -50,7 +58,8 @@ with bench.async_context():
 
     try:
         for part, job in jobs:
-            result_file = results_folder.joinpath(part).with_suffix('.txt')
+            result_file = results_folder.joinpath(part)
+            result_file = result_file.with_suffix(result_file.suffix + result_suffix)
             error_file = result_file.with_suffix('.error')
             result_file.parent.mkdir(parents=True, exist_ok=True)
 
