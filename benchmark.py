@@ -10,6 +10,18 @@ from natsort import natsorted
 import autocaml.validators.snpe as snpe
 import autocaml.validators.qnn as qnn
 
+
+class FakeFuture():
+    def __init__(self, result):
+        self.r = result
+
+    def result(self):
+        return self.r
+
+    def cancel(self):
+        pass
+
+
 parser = argparse.ArgumentParser()
 parser.add_argument('--debug', action='store_true')
 parser.add_argument('--regex', type=str, default=None)
@@ -53,7 +65,10 @@ with bench.async_context():
         part = qmodel.relative_to(dlc_folder)
 
         print(f'Scheduling {part}... ', flush=True)
-        future = bench.run_async(qmodel, convert=False)
+        if not args.debug:
+            future = bench.run_async(qmodel, convert=False)
+        else:
+            future = FakeFuture(bench.run(qmodel, convert=False))
         jobs.append((part, future))
 
     try:
