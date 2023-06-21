@@ -98,7 +98,7 @@ def convert_onnx(onnx_file):
         print(f'Attempting {("ONNX" if not args.ts else "TorchScript") if args.qnn else "DLC (fp32)"} -> {"QNN model library conversion" if args.qnn else "DLC (int8) quantization"} for part:', part)
         try:
             if args.qnn:
-                cc.compile(source_file, model_type=source_type, output_file=target, quantize=8, **extra_args)
+                cc.compile(source_file, model_type=source_type, output_file=target, quantize=8, generate_htp_context='sm8550', **extra_args)
             else:
                 cc.quantize(int_target, precision=8, output_file=target)
         except Exception:
