@@ -38,11 +38,11 @@ logging.basicConfig(level=logging.DEBUG-10 if debug else logging.INFO)
 
 
 if args.qnn:
-    bench = qnn.QnnBenchmark(devices=['S23', 'S23+', 'S23 Ultra'], runtime='htp', quantize=8, warmup=20, iters=100)
+    bench = qnn.QnnBenchmark(devices=['S23', 'S23+', 'S23 Ultra'], runtime='htp', quantize=8, warmup=20, iters=100, detailed=False)
     file_pattern = '*.qnn.so'
     result_suffix = '.qnn.txt'
 else:
-    bench = snpe.SnpeBenchmark(devices=['S23', 'S23+', 'S23 Ultra'], runtime='dsp', quantize=8, warmup=20, iters=100)
+    bench = snpe.SnpeBenchmark(devices=['S23', 'S23+', 'S23 Ultra'], runtime='dsp', quantize=8, warmup=20, iters=100, detailed=True)
     file_pattern = '*.int8.dlc'
     result_suffix = '.snpe.txt'
 
