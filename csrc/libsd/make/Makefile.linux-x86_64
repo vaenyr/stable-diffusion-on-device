@@ -1,0 +1,77 @@
+#
+# Copyright (c) 2020, 2022-2023 Qualcomm Technologies, Inc.
+# All Rights Reserved.
+# Confidential and Proprietary - Qualcomm Technologies, Inc.
+#
+
+# define relevant directories
+SRC_DIR := src
+QNN_API_INCLUDE := $(QNN_SDK_ROOT)/include
+SRC_API_DIR := api
+
+LIBSD_TARGET ?= x86_64-linux-clang
+export TARGET_DIR := ./bin/$(LIBSD_TARGET)
+
+libsd := $(TARGET_DIR)/libsd.so
+
+# define target architecture if not previously defined, default is x86
+ifndef TARGET_AARCH_VARS
+TARGET_AARCH_VARS:= -march=x86-64
+endif
+
+.PHONY: libsd_all
+.DEFAULT: libsd_all
+libsd_all: $(libsd)
+
+# Include paths
+INCLUDES += -I$(SRC_DIR) -I$(SRC_API_DIR) -I$(QNN_API_INCLUDE)
+
+# set compiler flags
+COMMON_CXXFLAGS = -std=c++2b -stdlib=libc++ -fno-rtti -fPIC -Wall -Werror $(INCLUDES)
+COMMON_LDFLAGS = -shared -s -fPIC
+
+ifdef LIBSD_DEBUG
+CXXFLAGS += $(COMMON_CXXFLAGS) -march=x86-64 -O0 -g -DLIBSD_API=""
+LDFLAGS += $(COMMON_LDFLAGS)
+else
+CXXFLAGS += $(COMMON_CXXFLAGS) -march=x86-64 -O3 -Wno-write-strings -fvisibility=hidden -DLIBSD_API="__attribute__((visibility(\"default\")))"
+LDFLAGS += $(COMMON_LDFLAGS) -fvisibility=hidden -flto
+endif
+
+# define library sources
+SOURCES := $(wildcard $(SRC_DIR)/*.cpp)
+
+# define object directory
+OBJ_ROOT := obj
+OBJ_DIR := obj/$(LIBSD_TARGET)
+
+# setup object files in object directory
+OBJECTS := $(patsubst %.cpp,$(OBJ_DIR)/%.o,$(foreach x,$(SOURCES),$(notdir $(x))))
+
+LIBS=-ldl
+
+# Rule to make executable
+.PHONY: libsd
+libsd: $(libsd)
+
+# Implicit rule to compile and link object files
+$(OBJ_DIR)/%.o: $(SRC_DIR)/%.cpp
+	$(CXX) $(CXXFLAGS) -c $^ -o $@
+
+# set up resources
+directories := $(TARGET_DIR) $(OBJ_DIR)
+
+# Compile
+$(libsd): $(OBJECTS) | $(directories)
+	$(CXX) $(CXXFLAGS) $(LINKFLAGS) -shared -o $@ $^ $(LIBS)
+
+# rule for object directory resource
+$(OBJECTS): | $(OBJ_DIR)
+
+# rule to create directories
+$(directories):
+	mkdir -p $@
+
+.PHONY: clean
+clean:
+	rm -rf $(OBJ_ROOT) $(TARGET_DIR)

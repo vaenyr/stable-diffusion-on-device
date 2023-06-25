@@ -2,6 +2,7 @@
 
 #include "errors.h"
 #include "context.h"
+#include "utils.h"
 
 #include <cstring>
 
@@ -40,46 +41,49 @@ ErrorCode _error(ErrorCode code, Context* c, T&& message, const char* func, cons
     return code;
 }
 
-#define _STR(x) #x
-#define STR(x) _STR(x)
 #define ERROR(code, reason) _error(code, cptr, reason, __func__, __FILE__, STR(__LINE__))
 
 
 #define TRY_RETRIEVE_CONTEXT \
     Context* cptr = nullptr; \
     if (context == nullptr) \
-        return ERROR(INVALID_CONTEXT, "context is nullptr"); \
+        return ERROR(ErrorCode::INVALID_CONTEXT, "context is nullptr"); \
     auto hnd = reinterpret_cast<CAPI_Context_Handler*>(context); \
     if (hnd->magic_info != LIBSD_CONTEXT_MAGIC_HEADER) \
-        return ERROR(INVALID_CONTEXT, "context magic header mismatch! got: " + std::to_string(hnd->magic_info)); \
+        return ERROR(ErrorCode::INVALID_CONTEXT, "context magic header mismatch! got: " + std::to_string(hnd->magic_info)); \
     if (hnd->context_version != LIBSD_DEFAULT_CONTEXT_VERSION) \
-        return ERROR(INVALID_CONTEXT, "context version mismatch! got: " + std::to_string(hnd->context_version)); \
+        return ERROR(ErrorCode::INVALID_CONTEXT, "context version mismatch! got: " + std::to_string(hnd->context_version)); \
     if (hnd->ref_count == 0) \
-        return ERROR(INVALID_CONTEXT, "context has been released!"); \
+        return ERROR(ErrorCode::INVALID_CONTEXT, "context has been released!"); \
     if (hnd->cptr == nullptr) \
-        return ERROR(INVALID_CONTEXT, "corrupted context, internal pointer is nullptr"); \
-    cptr = hnd->cptr
+        return ERROR(ErrorCode::INVALID_CONTEXT, "corrupted context, internal pointer is nullptr"); \
+    cptr = hnd->cptr; \
+    auto&& _logger_scope = cptr->activate_logger()
 
 
 static ErrorCode setup_impl(void** context, const char* models_dir, unsigned int latent_channels, unsigned int latent_spatial, unsigned int upscale_factor, unsigned int log_level) {
     Context* cptr = nullptr;
     if (context == nullptr)
-        return ERROR(INVALID_ARGUMENT, "Context argument should not be nullptr!");
+        return ERROR(ErrorCode::INVALID_ARGUMENT, "Context argument should not be nullptr!");
 
     if (*context != nullptr)
-        return ERROR(INVALID_ARGUMENT, "Context should point to a nullptr-initialized variable!");
+        return ERROR(ErrorCode::INVALID_ARGUMENT, "Context should point to a nullptr-initialized variable!");
+
+    if (!is_valid_log_level(log_level))
+        return ERROR(ErrorCode::INVALID_ARGUMENT, "Invalid log_level");
 
     CAPI_Context_Handler* hnd = new (std::nothrow) CAPI_Context_Handler;
     if (hnd == nullptr)
-        return ERROR(FAILED_ALLOCATION, "Could not create a new CAPI_Context_Handler object");
+        return ERROR(ErrorCode::FAILED_ALLOCATION, "Could not create a new CAPI_Context_Handler object");
 
     hnd->ref_count += 1;
-    hnd->cptr = new (std::nothrow) Context(models_dir, latent_channels, latent_spatial, upscale_factor, log_level);
+    hnd->cptr = new (std::nothrow) Context(models_dir, latent_channels, latent_spatial, upscale_factor, static_cast<LogLevel>(log_level));
     if (hnd->cptr == nullptr)
-        return ERROR(FAILED_ALLOCATION, "COuld not create a new Context object");
+        return ERROR(ErrorCode::FAILED_ALLOCATION, "COuld not create a new Context object");
 
     cptr = hnd->cptr;
     *context = hnd;
+    auto&& _logger_scope = cptr->activate_logger();
 
     try {
         cptr->initialize_qnn();
@@ -88,18 +92,18 @@ static ErrorCode setup_impl(void** context, const char* models_dir, unsigned int
     } catch (libsd_exception const& e) {
         return _error(e.code(), cptr, e.reason(), e.func(), e.file(), e.line());
     } catch (std::exception const& e) {
-        return ERROR(INTERNAL_ERROR, e.what());
+        return ERROR(ErrorCode::INTERNAL_ERROR, e.what());
     } catch (...) {
-        return ERROR(INTERNAL_ERROR, "Unspecified error");
+        return ERROR(ErrorCode::INTERNAL_ERROR, "Unspecified error");
     }
 
-    return NO_ERROR;
+    return ErrorCode::NO_ERROR;
 }
 
 static ErrorCode ref_context_impl(void* context) {
     TRY_RETRIEVE_CONTEXT;
     ++hnd->ref_count;
-    return NO_ERROR;
+    return ErrorCode::NO_ERROR;
 }
 
 static ErrorCode release_impl(void* context) {
@@ -110,33 +114,34 @@ static ErrorCode release_impl(void* context) {
         hnd->cptr = nullptr;
     }
 
-    return NO_ERROR;
+    return ErrorCode::NO_ERROR;
 }
 
-static ErrorCode generate_image_impl(void* context, const char* prompt, unsigned int prompt_length, float guidance_scale, unsigned char** image_out, unsigned int* image_buffer_size) {
+static ErrorCode generate_image_impl(void* context, const char* prompt, float guidance_scale, unsigned char** image_out, unsigned int* image_buffer_size) {
     TRY_RETRIEVE_CONTEXT;
     if (image_out == nullptr)
-        return ERROR(INVALID_ARGUMENT, "image_out is nullptr");
+        return ERROR(ErrorCode::INVALID_ARGUMENT, "image_out is nullptr");
     if (image_buffer_size == nullptr)
-        return ERROR(INVALID_ARGUMENT, "image_buffer_size is nullptr");
+        return ERROR(ErrorCode::INVALID_ARGUMENT, "image_buffer_size is nullptr");
 
     try {
         auto out = (*image_out == nullptr) ? cptr->allocate_output() : cptr->reuse_buffer(*image_out, *image_buffer_size);
+        cptr->generate(std::string(prompt), guidance_scale, out);
         *image_out = out.data_ptr();
         *image_buffer_size = out.data_len();
-        cptr->generate(std::string(prompt, prompt_length), guidance_scale, out);
+        out.own(false);
     } catch (libsd_exception const& e) {
         return _error(e.code(), cptr, e.reason(), e.func(), e.file(), e.line());
     } catch (std::exception const& e) {
-        return ERROR(INTERNAL_ERROR, e.what());
+        return ERROR(ErrorCode::INTERNAL_ERROR, e.what());
     } catch (...) {
-        return ERROR(INTERNAL_ERROR, "Unspecified error");
+        return ERROR(ErrorCode::INTERNAL_ERROR, "Unspecified error");
     }
 
-    return NO_ERROR;
+    return ErrorCode::NO_ERROR;
 }
 
-static const char* ger_error_description_impl(int errorcode) {
+static const char* get_error_description_impl(int errorcode) {
     if (!is_valid_error_code(errorcode))
         return nullptr;
 
@@ -148,7 +153,7 @@ static const char* get_last_error_extra_info_impl(int errorcode, void* context) 
         return nullptr;
 
     ErrorTable tab = nullptr;
-    if (context) {
+    if (context && errorcode != std::underlying_type_t<ErrorCode>(ErrorCode::INVALID_CONTEXT)) {
         auto hnd = reinterpret_cast<CAPI_Context_Handler*>(context);
         if (hnd->magic_info == LIBSD_CONTEXT_MAGIC_HEADER
             && hnd->context_version == LIBSD_DEFAULT_CONTEXT_VERSION
@@ -164,28 +169,28 @@ static const char* get_last_error_extra_info_impl(int errorcode, void* context) 
 
 extern "C" {
 
-LIBSD_API int setup(void** context, const char* models_dir, unsigned int latent_channels, unsigned int latent_spatial, unsigned int upscale_factor, unsigned int log_level) {
-    return libsd::setup_impl(context, models_dir, latent_channels, latent_spatial, upscale_factor, log_level);
+LIBSD_API int libsd_setup(void** context, const char* models_dir, unsigned int latent_channels, unsigned int latent_spatial, unsigned int upscale_factor, unsigned int log_level) {
+    return static_cast<int>(libsd::setup_impl(context, models_dir, latent_channels, latent_spatial, upscale_factor, log_level));
 }
 
-LIBSD_API int ref_context(void* context) {
-    return libsd::ref_context_impl(context);
+LIBSD_API int libsd_ref_context(void* context) {
+    return static_cast<int>(libsd::ref_context_impl(context));
 }
 
-LIBSD_API int release(void* context) {
-    return libsd::release_impl(context);
+LIBSD_API int libsd_release(void* context) {
+    return static_cast<int>(libsd::release_impl(context));
 }
 
-LIBSD_API int generate_image(void* context, const char* prompt, unsigned int prompt_length, float guidance_scale, unsigned char** image_out, unsigned int* image_buffer_size) {
-    return libsd::generate_image_impl(context, prompt, prompt_length, guidance_scale, image_out, image_buffer_size);
+LIBSD_API int libsd_generate_image(void* context, const char* prompt, float guidance_scale, unsigned char** image_out, unsigned int* image_buffer_size) {
+    return static_cast<int>(libsd::generate_image_impl(context, prompt, guidance_scale, image_out, image_buffer_size));
 }
 
 
-LIBSD_API const char* get_error_description(int errorcode) {
+LIBSD_API const char* libsd_get_error_description(int errorcode) {
     return libsd::get_error_description_impl(errorcode);
 }
 
-LIBSD_API const char* get_last_error_extra_info(int errorcode, void* context) {
+LIBSD_API const char* libsd_get_last_error_extra_info(int errorcode, void* context) {
     return libsd::get_last_error_extra_info_impl(errorcode, context);
 }
 

@@ -3,6 +3,20 @@
 #define LIBSD_API
 #endif
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+
+enum libsd_status_code {
+    LIBSD_NO_ERROR,
+    LIBSD_INVALID_CONTEXT,
+    LIBSD_INVALID_ARGUMENT,
+    LIBSD_FAILED_ALLOCATION,
+    LIBSD_RUNTIME_ERROR,
+    LIBSD_INTERNAL_ERROR,
+};
+
 
 /* Prepare models and devices to run image generation.
 
@@ -19,7 +33,7 @@
    by a call to ``release``, it should also be used when querying for error details; it should not be, however, used to generate images.
    If a method fails before a context object is created, *context will be nullptr.
 */
-LIBSD_API int setup(void** context, const char* models_dir, unsigned int latent_channels, unsigned int latent_spatial, unsigned int upscale_factor, unsigned int log_level);
+LIBSD_API int libsd_setup(void** context, const char* models_dir, unsigned int latent_channels, unsigned int latent_spatial, unsigned int upscale_factor, unsigned int log_level);
 
 
 /* Increase reference counter for a given context.
@@ -27,20 +41,19 @@ LIBSD_API int setup(void** context, const char* models_dir, unsigned int latent_
    For each additional call to ref_context, an additional call to release has to be made before
    a context will be actually cleaned.
 */
-LIBSD_API int ref_context(void* context);
+LIBSD_API int libsd_ref_context(void* context);
 
 /* Release a previously prepared context, obtained by a call to setup.
 
    Returns 0 if successful, otherwise an error code is returned.
 */
-LIBSD_API int release(void* context);
+LIBSD_API int libsd_release(void* context);
 
 
 /* Run a diffusion process.
 
    context - a previously prepared context obtained by a call to setup
    prompt - a user prompt to guide the generation process
-   prompt_length - prompt length
    guidance_scale - scaling factor for the classifier-free guidance: scale * noise(x, t, p) - (1 - scale) * noise(x, t, ""), SD1.5 default is 7.5
    image_out - output buffer that will hold a resulting RGB image, in [H, W, C] order, values in range 0-255
 
@@ -70,14 +83,14 @@ LIBSD_API int release(void* context);
 
    Returns 0 if successful, otherwise an error code is returned.
 */
-LIBSD_API int generate_image(void* context, const char* prompt, unsigned int prompt_length, float guidance_scale, unsigned char** image_out, unsigned int* image_buffer_size);
+LIBSD_API int libsd_generate_image(void* context, const char* prompt, float guidance_scale, unsigned char** image_out, unsigned int* image_buffer_size);
 
 
 /* Return a human-readable null-terminated string describing a returned error code.
 
    The method can return nullptr if ``errorcode`` is not a valid error code.
 */
-LIBSD_API const char* get_error_description(int errorcode);
+LIBSD_API const char* libsd_get_error_description(int errorcode);
 
 
 /* Return extra information about the last error with ``errorcode`` that occurred within a given ``context``.
@@ -91,4 +104,8 @@ LIBSD_API const char* get_error_description(int errorcode);
    if ``errorcode`` has not happened for ``context`` or if no extra information has been provided by the implementation when an error was recorded.
    Otherwise a null-terminated string is returned.
 */
-LIBSD_API const char* get_last_error_extra_info(int errorcode, void* context);
+LIBSD_API const char* libsd_get_last_error_extra_info(int errorcode, void* context);
+
+#ifdef __cplusplus
+}
+#endif

@@ -3,33 +3,46 @@
 
 #include <string>
 
+#include "errors.h"
+#include "buffer.h"
+#include "qnn_context.h"
+#include "logging.h"
+
+
 namespace libsd {
 
 class Context {
 public:
-    Context(std::string const& models_dir, unsigned int latent_channels, unsigned int latent_spatial, unsigned int upscale_factor, unsigned int log_level);
+    Context(std::string const& models_dir, unsigned int latent_channels, unsigned int latent_spatial, unsigned int upscale_factor, LogLevel log_level);
     virtual ~Context();
 
     void initialize_qnn();
     void load_models();
     void prepare_sampler();
 
-    void generate(std::string const& prompt, float guidance, Buffer<unsigned char> output);
+    void generate(std::string const& prompt, float guidance, Buffer<unsigned char>& output);
+
+    ErrorTable get_error_table() const { return _error_table; }
+
+    Buffer<unsigned char> allocate_output() const;
+    Buffer<unsigned char> reuse_buffer(unsigned char* buffer, unsigned int buffer_len) const;
+
+    ActiveLoggerScopeGuard activate_logger() { return ActiveLoggerScopeGuard(_logger); }
 
 private:
     std::string models_dir;
     unsigned int latent_channels;
     unsigned int latent_spatial;
     unsigned int upscale_factor;
-    unsigned int log_level;
 
     bool _failed_and_gave_up = false;
     bool _qnn_initialized = false;
     bool _models_loaded = false;
 
-    void* _error_table = nullptr;
+    ErrorTable _error_table;
+    Logger _logger;
 
-    void _init_qnn();
+    std::shared_ptr<QnnContext> _qnn = nullptr;
 };
 
 }

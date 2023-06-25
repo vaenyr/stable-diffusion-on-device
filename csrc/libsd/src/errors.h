@@ -1,11 +1,15 @@
 #ifndef LIBSD_ERRORS_H
 #define LIBSD_ERRORS_H
 
-#include "context.h"
+#include <array>
+#include <optional>
+#include <string>
+#include <memory>
+
 
 namespace libsd {
 
-enum ErrorCode {
+enum class ErrorCode : int {
     NO_ERROR,
     INVALID_CONTEXT,
     INVALID_ARGUMENT,
@@ -16,11 +20,11 @@ enum ErrorCode {
 
 constexpr unsigned int LIBSD_NUM_ERRORS = 6;
 
-using ErrorTable = std::string*;
+using ErrorTable = std::shared_ptr<std::array<std::optional<std::string>, LIBSD_NUM_ERRORS>>;
 
 ErrorTable allocate_error_table();
-bool is_valid_error_code(int errorcode);
 
+bool is_valid_error_code(int errorcode);
 
 void record_error(ErrorTable tab, ErrorCode error);
 void record_error(ErrorTable tab, ErrorCode error, std::string const& extra_info);
@@ -33,11 +37,9 @@ const char* get_last_error_info(ErrorTable tab, ErrorCode error);
 
 class libsd_exception : public std::exception {
 public:
-    libsd_exception(ErrorCode code, std::string msg, const char* func, const char* file, const char* line)
-        : _code(code), _reason(std::move(msg)), _func(func), _file(file), _line(line)
-    {}
+    libsd_exception(ErrorCode code, std::string msg, const char* func, const char* file, const char* line);
 
-    virtual const char* what() const noexcept;
+    virtual const char* what() const noexcept { return _what.c_str(); }
 
     ErrorCode code() const noexcept { return _code; }
     const char* reason() const noexcept { return _reason.c_str(); }
@@ -51,6 +53,8 @@ private:
     std::string _func;
     std::string _file;
     std::string _line;
+
+    std::string _what;
 };
 
 }
