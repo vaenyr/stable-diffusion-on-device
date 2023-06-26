@@ -1,5 +1,11 @@
 #include "format.h"
 
+#include <string>
+#include <fstream>
+#include <cstddef>
+#include <vector>
+
+
 namespace libsd {
 
 namespace details {
@@ -22,6 +28,37 @@ std::string format(std::size_t pos, std::string&& fmt) {
     return std::move(fmt);
 }
 
+}
+
+
+std::size_t get_file_size(std::string const& path) {
+    std::ifstream in(path, std::ifstream::binary);
+    if (!in)
+        return 0;
+
+    in.seekg(0, in.end);
+    auto&& length = in.tellg();
+    in.seekg(0, in.beg);
+    return length;
+}
+
+bool read_file_content(std::string const& path, std::vector<unsigned char>& buffer) {
+    std::ifstream in(path, std::ifstream::binary);
+    if (!in)
+        return false;
+
+    in.seekg(0, in.end);
+    auto&& length = in.tellg();
+    in.seekg(0, in.beg);
+
+    buffer.resize(length);
+    if (buffer.size() != length)
+        return false;
+
+    if (!in.read(buffer.data(), length, buffer.size()))
+        return false;
+
+    return true;
 }
 
 }

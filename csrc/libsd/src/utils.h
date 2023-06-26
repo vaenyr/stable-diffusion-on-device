@@ -4,6 +4,10 @@
 #define _STR(x) #x
 #define STR(x) _STR(x)
 
+#include <cstddef>
+#include <string>
+
+
 namespace libsd {
 
 namespace details {
@@ -43,6 +47,9 @@ template <class... T>
 std::string format(std::string&& fmt, T&&... args) {
     return details::format(std::move(fmt), std::forward<T>(args)...);
 }
+
+std::size_t get_file_size(std::string const& path);
+bool read_file_content(std::string const& path, std::vector<unsigned char>& buffer);
 
 }
 
