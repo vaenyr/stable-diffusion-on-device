@@ -18,6 +18,14 @@ enum libsd_status_code {
 };
 
 
+enum libsd_log_level {
+   LIBSD_LOG_DEBUG,
+   LIBSD_LOG_INFO,
+   LIBSD_LOG_ERROR,
+   LIBSD_LOG_NOTHING
+};
+
+
 /* Prepare models and devices to run image generation.
 
    context - will return prepared context (type void*) there, should not be nullptr
@@ -25,7 +33,8 @@ enum libsd_status_code {
    latent_channels - latent representation channels, SD1.5 uses 4
    latent_spatial - latent representation spatial dimensions, SD1.5 uses 64
    upscale_factor - upscaling factor for the decoder, SD1.5 uses 8
-   log_level - logging level
+   steps - number of denoising steps to perform when generating an image, can be later overwritten with libsd_set_steps
+   log_level - logging level, can be later overwritten with libsd_set_log_level
 
    Returns 0 if successful, otherwise an error code is returned.
    If successful, *context will be pointer to a prepared context that should be passed to other functions and cleaned when no longer needed, see release.
@@ -33,7 +42,27 @@ enum libsd_status_code {
    by a call to ``release``, it should also be used when querying for error details; it should not be, however, used to generate images.
    If a method fails before a context object is created, *context will be nullptr.
 */
-LIBSD_API int libsd_setup(void** context, const char* models_dir, unsigned int latent_channels, unsigned int latent_spatial, unsigned int upscale_factor, unsigned int log_level);
+LIBSD_API int libsd_setup(void** context, const char* models_dir, unsigned int latent_channels, unsigned int latent_spatial, unsigned int upscale_factor, unsigned int steps, unsigned int log_level);
+
+
+/* Changes the number of denoising steps performed when generating images using the provided context.
+
+   context - a previously prepared context obtained by a call to setup
+   unsigned int steps - new number of denoising steps
+   
+   Returns 0 if successful, otherwise an error code is returned.
+*/
+LIBSD_API int libsd_set_steps(void* context, unsigned int steps);
+
+
+/* Changes the log level for the provided context.
+
+   context - a previously prepared context obtained by a call to setup
+   unsigned int log_level - new log level
+   
+   Returns 0 if successful, otherwise an error code is returned.
+*/
+LIBSD_API int libsd_set_log_level(void* context, unsigned int log_level);
 
 
 /* Increase reference counter for a given context.

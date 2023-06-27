@@ -39,7 +39,7 @@ void Context::load_models() {
         auto&& path = models_dir + "/" + name;
         auto&& graphs = _qnn->load_context(path);
         if (graphs.empty())
-            throw libsd_exception(ErrorCode::INVALID_ARGUMENT, format("Deserialized context {} does not contain any graphs!", path), __func__, __FILE__, STR(__LINE__));
+            throw libsd_exception(ErrorCode::INVALID_ARGUMENT, format("Deserialized context {} does not contain any graphs!", path), "load_models", __FILE__, STR(__LINE__));
         if (graphs.size() > 1)
             info("Warning: deserialized context {} contains more than 1 graph {}, only the first one will be used", path, graphs.size());
         return graphs.front();
@@ -53,18 +53,23 @@ void Context::load_models() {
         .unet_outputs = get_model("sd_unet_outputs.bin"),
         .unet_head = get_model("sd_unet_head.bin")
     });
+
+    info("All models loaded!");
 }
 
 
-void Context::prepare_sampler() {
+void Context::prepare_solver() {
+    info("ODE solver prepared!");
 }
 
 
 void Context::prepare_buffers() {
+    info("Input/output buffers created and prepared!");
 }
 
 
-void Context::prepare_schedule() {
+void Context::prepare_schedule(unsigned int steps) {
+    info("Time schedule prepared for {} steps!", steps);
 }
 
 
@@ -75,6 +80,9 @@ void Context::generate(std::string const& prompt, float guidance, Buffer<unsigne
         return;
     if (!_model)
         return;
+
+    info("Starting image generation for prompt: \"{}\" and guidance {}", prompt, guidance);
+    debug("Current steps: {}", t_schedule.size());
 
     // _tokenize(prompt);
 
@@ -108,6 +116,7 @@ void Context::generate(std::string const& prompt, float guidance, Buffer<unsigne
 
     // _run_model(_model.decoder);
 
+    info("Image successfully generated!");
 }
 
 

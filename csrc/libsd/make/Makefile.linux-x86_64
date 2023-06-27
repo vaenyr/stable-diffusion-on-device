@@ -27,7 +27,7 @@ libsd_all: $(libsd)
 INCLUDES += -I$(SRC_DIR) -I$(SRC_API_DIR) -I$(QNN_API_INCLUDE)
 
 # set compiler flags
-COMMON_CXXFLAGS = -std=c++20 -stdlib=libc++ -fno-rtti -fPIC -Wall -Werror $(INCLUDES)
+COMMON_CXXFLAGS = -std=c++20 -fno-rtti -fPIC -Wall -Werror $(INCLUDES)
 COMMON_LDFLAGS = -shared -s -fPIC
 
 ifdef LIBSD_DEBUG

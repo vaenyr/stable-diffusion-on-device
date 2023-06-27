@@ -58,10 +58,11 @@ ErrorCode _error(ErrorCode code, Context* c, T&& message, const char* func, cons
     if (hnd->cptr == nullptr) \
         return ERROR(ErrorCode::INVALID_CONTEXT, "corrupted context, internal pointer is nullptr"); \
     cptr = hnd->cptr; \
-    auto&& _logger_scope = cptr->activate_logger()
+    auto&& _logger_scope = cptr->activate_logger(); \
+    (void)_logger_scope
 
 
-static ErrorCode setup_impl(void** context, const char* models_dir, unsigned int latent_channels, unsigned int latent_spatial, unsigned int upscale_factor, unsigned int log_level) {
+static ErrorCode setup_impl(void** context, const char* models_dir, unsigned int latent_channels, unsigned int latent_spatial, unsigned int upscale_factor, unsigned int steps, unsigned int log_level) {
     Context* cptr = nullptr;
     if (context == nullptr)
         return ERROR(ErrorCode::INVALID_ARGUMENT, "Context argument should not be nullptr!");
@@ -84,11 +85,46 @@ static ErrorCode setup_impl(void** context, const char* models_dir, unsigned int
     cptr = hnd->cptr;
     *context = hnd;
     auto&& _logger_scope = cptr->activate_logger();
+    (void)_logger_scope;
 
     try {
         cptr->initialize_qnn();
         cptr->load_models();
-        cptr->prepare_sampler();
+        cptr->prepare_solver();
+        cptr->prepare_schedule(steps);
+    } catch (libsd_exception const& e) {
+        return _error(e.code(), cptr, e.reason(), e.func(), e.file(), e.line());
+    } catch (std::exception const& e) {
+        return ERROR(ErrorCode::INTERNAL_ERROR, e.what());
+    } catch (...) {
+        return ERROR(ErrorCode::INTERNAL_ERROR, "Unspecified error");
+    }
+
+    return ErrorCode::NO_ERROR;
+}
+
+static ErrorCode set_steps_impl(void* context, unsigned int steps) {
+    TRY_RETRIEVE_CONTEXT;
+    try {
+        cptr->prepare_schedule(steps);
+    } catch (libsd_exception const& e) {
+        return _error(e.code(), cptr, e.reason(), e.func(), e.file(), e.line());
+    } catch (std::exception const& e) {
+        return ERROR(ErrorCode::INTERNAL_ERROR, e.what());
+    } catch (...) {
+        return ERROR(ErrorCode::INTERNAL_ERROR, "Unspecified error");
+    }
+
+    return ErrorCode::NO_ERROR;
+}
+
+static ErrorCode set_log_level_impl(void* context, unsigned int log_level) {
+    TRY_RETRIEVE_CONTEXT;
+    if (!is_valid_log_level(log_level))
+        return ERROR(ErrorCode::INVALID_ARGUMENT, "Invalid log_level");
+
+    try {
+        cptr->get_logger().set_level(static_cast<LogLevel>(log_level));
     } catch (libsd_exception const& e) {
         return _error(e.code(), cptr, e.reason(), e.func(), e.file(), e.line());
     } catch (std::exception const& e) {
@@ -169,8 +205,16 @@ static const char* get_last_error_extra_info_impl(int errorcode, void* context) 
 
 extern "C" {
 
-LIBSD_API int libsd_setup(void** context, const char* models_dir, unsigned int latent_channels, unsigned int latent_spatial, unsigned int upscale_factor, unsigned int log_level) {
-    return static_cast<int>(libsd::setup_impl(context, models_dir, latent_channels, latent_spatial, upscale_factor, log_level));
+LIBSD_API int libsd_setup(void** context, const char* models_dir, unsigned int latent_channels, unsigned int latent_spatial, unsigned int upscale_factor, unsigned int steps, unsigned int log_level) {
+    return static_cast<int>(libsd::setup_impl(context, models_dir, latent_channels, latent_spatial, upscale_factor, steps, log_level));
+}
+
+LIBSD_API int libsd_set_steps(void* context, unsigned int steps) {
+    return static_cast<int>(libsd::set_steps_impl(context, steps));
+}
+
+LIBSD_API int libsd_set_log_level(void* context, unsigned int log_level) {
+    return static_cast<int>(libsd::set_log_level_impl(context, log_level));
 }
 
 LIBSD_API int libsd_ref_context(void* context) {
@@ -184,7 +228,6 @@ LIBSD_API int libsd_release(void* context) {
 LIBSD_API int libsd_generate_image(void* context, const char* prompt, float guidance_scale, unsigned char** image_out, unsigned int* image_buffer_size) {
     return static_cast<int>(libsd::generate_image_impl(context, prompt, guidance_scale, image_out, image_buffer_size));
 }
-
 
 LIBSD_API const char* libsd_get_error_description(int errorcode) {
     return libsd::get_error_description_impl(errorcode);

@@ -4,7 +4,11 @@
 
 int main() {
     void* ctx = nullptr;
-    int status = libsd_setup(&ctx, "../../../../dlc", 4, 64, 8, 0);
+#ifdef __ANDROID__
+    int status = libsd_setup(&ctx, "/data/local/tmp/libsd", 4, 64, 8, 20, LIBSD_LOG_DEBUG);
+#else
+    int status = libsd_setup(&ctx, "../../../../dlc", 4, 64, 8, 20, LIBSD_LOG_DEBUG);
+#endif
     if (status) {
         std::cout << "Initialization error: " << libsd_get_error_description(status) << "; " << libsd_get_last_error_extra_info(status, ctx) << std::endl;
         if (ctx)

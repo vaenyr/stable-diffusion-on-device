@@ -31,4 +31,13 @@ MY_SRC_FILES                   := $(wildcard $(LOCAL_PATH)/../src/*.cpp)
 LOCAL_MODULE                   := libsd
 LOCAL_SRC_FILES                := $(subst make/,,$(MY_SRC_FILES))
 LOCAL_LDLIBS                   := -lGLESv2 -lEGL
+include $(BUILD_SHARED_LIBRARY)
+
+include $(CLEAR_VARS)
+LOCAL_C_INCLUDES               := -I $(LOCAL_PATH)/../api/
+MY_SRC_FILES                   := $(LOCAL_PATH)/../test/simple_app.cpp
+LOCAL_MODULE                   := test
+LOCAL_SRC_FILES                := $(subst make/,,$(MY_SRC_FILES))
+LOCAL_LDLIBS                   := -lGLESv2 -lEGL
+LOCAL_SHARED_LIBRARIES         := libsd
 include $(BUILD_EXECUTABLE)

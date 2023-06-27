@@ -3,8 +3,10 @@
 
 #include <list>
 #include <span>
+#include <vector>
 #include <string>
 #include <memory>
+#include <optional>
 
 #include <QnnInterface.h>
 #include <System/QnnSystemInterface.h>
@@ -56,7 +58,7 @@ public:
 
     void register_op_package(std::string const& package_path, std::string const& package_interface_provider) const;
 
-    std::span<const QnnSystemContext_BinaryInfo_t> get_binary_info(std::vector<unsigned char>& buffer) const;
+    QnnSystemContext_BinaryInfo_t const& get_binary_info(std::vector<unsigned char>& buffer) const;
     Qnn_GraphHandle_t retrieve_graph(Qnn_ContextHandle_t context, const char* graph_name) const;
 
     std::pair<std::shared_ptr<void>,int> allocate_ion(uint32_t size);

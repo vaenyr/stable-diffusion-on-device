@@ -255,12 +255,17 @@ void QnnApi::register_op_package(std::string const& package_path, std::string co
 }
 
 
-std::span<const QnnSystemContext_BinaryInfo_t> QnnApi::get_binary_info(std::vector<unsigned char>& buffer) const {
+QnnSystemContext_BinaryInfo_t const& QnnApi::get_binary_info(std::vector<unsigned char>& buffer) const {
+    if (!system_hnd)
+        throw libsd_exception(ErrorCode::INTERNAL_ERROR, "Attempted to get binary info of a serialized context but system context has not been created - see previous warnings", __func__, __FILE__, STR(__LINE__));
+
     const QnnSystemContext_BinaryInfo_t* binary_info = nullptr;
     Qnn_ContextBinarySize_t binary_info_size = 0;
     _generic_qnn_api_call(system_interface.systemContextGetBinaryInfo, "systemContextGetBinaryInfo", __func__, __FILE__, STR(__LINE__), system_hnd.get(), buffer.data(), buffer.size(), &binary_info, &binary_info_size);
-    debug("Found binary info in number of: {}", binary_info_size);
-    return std::span<const QnnSystemContext_BinaryInfo_t>(binary_info, binary_info_size);
+    if (!binary_info)
+        throw libsd_exception(ErrorCode::INVALID_ARGUMENT, "Returned binary info is a nullptr!", __func__, __FILE__, STR(__LINE__));
+
+    return *binary_info;
 }
 
 
@@ -443,30 +448,29 @@ graph_refs QnnBackend::load_context(std::string const& context_blob) {
     std::vector<QnnGraph> graphs;
     graph_refs ret;
 
+    debug("Investigating context binary info...");
     auto&& bin_info = api->get_binary_info(buffer);
-    for (auto&& e : bin_info) {
-        debug("Investigating next binary info...");
-        QnnSystemContext_GraphInfo_t* graphs_info = nullptr;
-        uint32_t num_graphs = 0;
-        if (e.version == QNN_SYSTEM_CONTEXT_BINARY_INFO_VERSION_1) {
-            graphs_info = e.contextBinaryInfoV1.graphs;
-            num_graphs = e.contextBinaryInfoV1.numGraphs;
-        } else if (e.version == QNN_SYSTEM_CONTEXT_BINARY_INFO_VERSION_2) {
-            graphs_info = e.contextBinaryInfoV2.graphs;
-            num_graphs = e.contextBinaryInfoV1.numGraphs;
-        } else
-            throw libsd_exception(ErrorCode::INVALID_ARGUMENT, format("Unexpected binary info version: {}", e.version), __func__, __FILE__, STR(__LINE__));
 
-        debug("{} graphs reported", num_graphs);
-        for (uint32_t i=0; i<num_graphs; ++i) {
-            auto&& graph_info = graphs_info[i];
-            if (graph_info.version == QNN_SYSTEM_CONTEXT_GRAPH_INFO_VERSION_1) {
-                auto&& graph_hnd = api->retrieve_graph(context_hnd.get(), graph_info.graphInfoV1.graphName);
-                graphs.emplace_back(QnnGraph(context_hnd, api, graph_info.graphInfoV1.graphName, graph_info.graphInfoV1.graphInputs, graph_info.graphInfoV1.numGraphInputs, graph_info.graphInfoV1.graphOutputs, graph_info.graphInfoV1.numGraphOutputs, graph_hnd));
-                ret.push_back(graphs.back());
-            } else
-                throw libsd_exception(ErrorCode::INVALID_ARGUMENT, format("Unexpected graph info version: {}", graph_info.version), __func__, __FILE__, STR(__LINE__));
-        }
+    QnnSystemContext_GraphInfo_t* graphs_info = nullptr;
+    uint32_t num_graphs = 0;
+    if (bin_info.version == QNN_SYSTEM_CONTEXT_BINARY_INFO_VERSION_1) {
+        graphs_info = bin_info.contextBinaryInfoV1.graphs;
+        num_graphs = bin_info.contextBinaryInfoV1.numGraphs;
+    } else if (bin_info.version == QNN_SYSTEM_CONTEXT_BINARY_INFO_VERSION_2) {
+        graphs_info = bin_info.contextBinaryInfoV2.graphs;
+        num_graphs = bin_info.contextBinaryInfoV1.numGraphs;
+    } else
+        throw libsd_exception(ErrorCode::INVALID_ARGUMENT, format("Unexpected binary info version: {}", bin_info.version), __func__, __FILE__, STR(__LINE__));
+
+    debug("{} graphs reported", num_graphs);
+    for (uint32_t i=0; i<num_graphs; ++i) {
+        auto&& graph_info = graphs_info[i];
+        if (graph_info.version == QNN_SYSTEM_CONTEXT_GRAPH_INFO_VERSION_1) {
+            auto&& graph_hnd = api->retrieve_graph(context_hnd.get(), graph_info.graphInfoV1.graphName);
+            graphs.emplace_back(QnnGraph(context_hnd, api, graph_info.graphInfoV1.graphName, graph_info.graphInfoV1.graphInputs, graph_info.graphInfoV1.numGraphInputs, graph_info.graphInfoV1.graphOutputs, graph_info.graphInfoV1.numGraphOutputs, graph_hnd));
+            ret.push_back(graphs.back());
+        } else
+            throw libsd_exception(ErrorCode::INVALID_ARGUMENT, format("Unexpected graph info version: {}", graph_info.version), __func__, __FILE__, STR(__LINE__));
     }
 
     ctx.emplace_back(QnnContext(std::move(context_hnd), std::move(graphs)));

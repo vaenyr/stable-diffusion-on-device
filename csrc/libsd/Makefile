@@ -32,9 +32,10 @@ clean: clean_x86 clean_android
 
 all_x86:
 	$(call build_if_exists,$(libsd),-$(MAKE) -f $(make_dir)/Makefile.linux-x86_64)
+	$(call build_if_exists,test,$(CXX) -g -O0 -lsd -I api -I $(QNN_SDK_ROOT)/include -L bin/x86_64-linux-clang test/simple_app.cpp -o bin/x86_64-linux-clang/test)
 
 clean_x86:
-	@rm -rf bin/x86_64-linux-clang/libsd.so obj/x86_64-linux-clang
+	@rm -rf bin/x86_64-linux-clang/libsd.so bin/x86_64-linux-clang/test obj/x86_64-linux-clang
 
 # Android Targets
 
@@ -62,8 +63,9 @@ clean_aarch64-android:
 # utilities
 # Syntax: $(call build_if_exists <dir>,<cmd>)
 build_if_exists = $(if $(wildcard $(1)),$(2),$(warning WARNING: $(1) does not exist. Skipping Compilation))
-
-rename_target_dirs = mv libs/* bin/  \
+rename_target_dirs = find . -type d -execdir rename 's/arm64-v8a/aarch64-android/' '{}' \+ \
+                     && find . -type d -execdir rename 's/armeabi-v7a/arm-android/' '{}' \+ \
+                     && mv libs/* bin/  \
                      && rm -rf libs \
 
 check_ndk:

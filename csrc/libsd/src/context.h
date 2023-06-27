@@ -30,9 +30,9 @@ public:
 
     void initialize_qnn();
     void load_models();
-    void prepare_sampler();
+    void prepare_solver();
     void prepare_buffers();
-    void prepare_schedule();
+    void prepare_schedule(unsigned int steps);
 
     void generate(std::string const& prompt, float guidance, Buffer<unsigned char>& output);
 
@@ -41,6 +41,8 @@ public:
     Buffer<unsigned char> allocate_output() const;
     Buffer<unsigned char> reuse_buffer(unsigned char* buffer, unsigned int buffer_len) const;
 
+    Logger& get_logger() { return _logger; }
+    Logger const& get_logger() const { return _logger; }
     ActiveLoggerScopeGuard activate_logger() { return ActiveLoggerScopeGuard(_logger); }
 
 private:
