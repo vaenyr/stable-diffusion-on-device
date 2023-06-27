@@ -1,4 +1,4 @@
-#include "format.h"
+#include "utils.h"
 
 #include <string>
 #include <fstream>
@@ -55,7 +55,7 @@ bool read_file_content(std::string const& path, std::vector<unsigned char>& buff
     if (buffer.size() != length)
         return false;
 
-    if (!in.read(buffer.data(), length, buffer.size()))
+    if (!in.read(reinterpret_cast<char*>(buffer.data()), buffer.size()))
         return false;
 
     return true;

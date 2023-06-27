@@ -1,0 +1,19 @@
+{
+    "configurations": [
+        {
+            "name": "Linux",
+            "includePath": [
+                "${workspaceFolder}/csrc/**",
+                "${env:QNN_SDK_ROOT}/include"
+            ],
+            "defines": [
+                "LIBSD_API=\"\""
+            ],
+            "compilerPath": "/usr/lib/llvm/16/bin/clang",
+            "cStandard": "c17",
+            "cppStandard": "c++20",
+            "intelliSenseMode": "linux-clang-x64"
+        }
+    ],
+    "version": 4
+}

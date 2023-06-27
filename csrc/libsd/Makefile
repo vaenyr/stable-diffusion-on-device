@@ -1,4 +1,4 @@
-27.8327.83#
+#
 # Copyright (c) 2020-2022 Qualcomm Technologies, Inc.
 # All Rights Reserved.
 # Confidential and Proprietary - Qualcomm Technologies, Inc.
@@ -30,7 +30,7 @@ all: $(EXE_SOURCES) all_x86 all_android
 # Combined Targets
 clean: clean_x86 clean_android
 
-all_x86: clean_x86
+all_x86:
 	$(call build_if_exists,$(libsd),-$(MAKE) -f $(make_dir)/Makefile.linux-x86_64)
 
 clean_x86:
@@ -62,10 +62,6 @@ clean_aarch64-android:
 # utilities
 # Syntax: $(call build_if_exists <dir>,<cmd>)
 build_if_exists = $(if $(wildcard $(1)),$(2),$(warning WARNING: $(1) does not exist. Skipping Compilation))
-#rename_target_dirs = find . -type d -execdir rename 's/arm64-v8a/aarch64-android/' '{}' \+ \
-                     && find . -type d -execdir rename 's/armeabi-v7a/arm-android/' '{}' \+ \
-                     && mv libs/* bin/  \
-                     && rm -rf libs \
 
 rename_target_dirs = mv libs/* bin/  \
                      && rm -rf libs \

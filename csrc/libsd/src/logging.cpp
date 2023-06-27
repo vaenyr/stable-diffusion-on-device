@@ -1,7 +1,9 @@
 #include "logging.h"
+#include "errors.h"
 
 #include <iostream>
 #include <utility>
+#include <cstring>
 
 #ifdef __ANDROID__
 #include <android/log.h>
@@ -19,7 +21,23 @@ namespace {
 thread_local Logger* active_logger = nullptr;
 
 void dispatch_message(std::ostream& out, uint64_t timestamp, const char* level_tag, int android_prio, const char* message) {
-    out << "[" << timestamp << "]:" << level_tag << " " << message << std::endl;
+    auto&& len = strlen(message);
+    while (len && message[len-1] == '\n')
+        --len;
+
+    out.write("[", 1);
+    if (timestamp)
+        out << '+' << timestamp;
+    else
+        out << '?';
+    out.write("]:", 3);
+    out.write(level_tag, strlen(level_tag));
+    out.write(" ", 1);
+    out.write(message, len);
+    if (len && message[len-1] != '\n')
+        out.write("\n", 1);
+    out.flush();
+
 #ifdef __ANDROID__
     __android_log_write(android_prio, "[LibSD]", message);
 #endif
@@ -52,6 +70,7 @@ void message(uint64_t timestamp, LogLevel level, std::string const& str) {
 using namespace libsd;
 
 Logger::Logger() : current_level(LogLevel::NOTHING) {
+    created = std::time(nullptr);
 }
 
 Logger::~Logger() {
@@ -69,16 +88,16 @@ void Logger::message(uint64_t timestamp, LogLevel level, std::string const& str)
 
     switch (level) {
     case LogLevel::DEBUG:
-        dispatch_message(std::cout, timestamp, "[DEBUG]", ANDROID_LOG_DEBUG, str.c_str());
+        dispatch_message(std::cout, timestamp > created ? timestamp - created : 0, "[DEBUG]", ANDROID_LOG_DEBUG, str.c_str());
         break;
     case LogLevel::INFO:
-        dispatch_message(std::cout, timestamp, "[INFO]", ANDROID_LOG_INFO, str.c_str());
+        dispatch_message(std::cout, timestamp > created ? timestamp - created : 0, "[INFO]", ANDROID_LOG_INFO, str.c_str());
         break;
     case LogLevel::ERROR:
-        dispatch_message(std::cerr, timestamp, "[ERROR]", ANDROID_LOG_ERROR, str.c_str());
+        dispatch_message(std::cerr, timestamp > created ? timestamp - created : 0, "[ERROR]", ANDROID_LOG_ERROR, str.c_str());
         break;
     case LogLevel::NOTHING:
-        std::unreachable();
+        throw libsd_exception(ErrorCode::INTERNAL_ERROR, "Unreachable", __func__, __FILE__, STR(__LINE__));
     }
 }
 

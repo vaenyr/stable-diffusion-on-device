@@ -59,6 +59,7 @@ public:
 
 private:
     LogLevel current_level;
+    uint64_t created;
 };
 
 

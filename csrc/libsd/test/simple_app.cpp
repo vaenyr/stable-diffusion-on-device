@@ -4,7 +4,7 @@
 
 int main() {
     void* ctx = nullptr;
-    int status = libsd_setup(&ctx, "../../../dlc/", 4, 64, 8, 0);
+    int status = libsd_setup(&ctx, "../../../../dlc", 4, 64, 8, 0);
     if (status) {
         std::cout << "Initialization error: " << libsd_get_error_description(status) << "; " << libsd_get_last_error_extra_info(status, ctx) << std::endl;
         if (ctx)

@@ -2,6 +2,7 @@
 #define LIBSD_CONTEXT_H
 
 #include <string>
+#include <optional>
 
 #include "errors.h"
 #include "buffer.h"
@@ -11,6 +12,17 @@
 
 namespace libsd {
 
+
+struct StableDiffusionModel {
+    graph_ref cond_model;
+    graph_ref decoder;
+    graph_ref unet_inputs;
+    graph_ref unet_middle;
+    graph_ref unet_outputs;
+    graph_ref unet_head;
+};
+
+
 class Context {
 public:
     Context(std::string const& models_dir, unsigned int latent_channels, unsigned int latent_spatial, unsigned int upscale_factor, LogLevel log_level);
@@ -19,6 +31,8 @@ public:
     void initialize_qnn();
     void load_models();
     void prepare_sampler();
+    void prepare_buffers();
+    void prepare_schedule();
 
     void generate(std::string const& prompt, float guidance, Buffer<unsigned char>& output);
 
@@ -37,12 +51,20 @@ private:
 
     bool _failed_and_gave_up = false;
     bool _qnn_initialized = false;
-    bool _models_loaded = false;
 
     ErrorTable _error_table;
     Logger _logger;
 
-    std::shared_ptr<QnnContext> _qnn = nullptr;
+    std::shared_ptr<QnnBackend> _qnn;
+    std::optional<StableDiffusionModel> _model;
+
+    std::vector<unsigned int> prompt_tokens;
+    std::vector<float> time_enc;
+    std::vector<float> x_curr;
+    std::vector<float> y_cond;
+    std::vector<float> y_uncond;
+
+    std::vector<std::vector<float>> t_schedule; // sequence of encoded timesteps
 };
 
 }
