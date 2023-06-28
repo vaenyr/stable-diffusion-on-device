@@ -136,8 +136,8 @@ Library status:
 - Loading models: DONE
 - Match profiling speed: DONE
 - zero-copy data allocation (Android only): DONE
-- Correctly connect inputs/outputs of different models: TODO
-- Handle (de)quantization of input/output data: TODO
+- Correctly connect inputs/outputs of different models: DONE
+- Handle (de)quantization of input/output data: DONE
+- Handle interpolation between conditional and unconditional outputs: DONE
 - CLIP tokenizer: TODO
 - DPM solver: TODO
-

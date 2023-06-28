@@ -8,6 +8,9 @@
 #include <vector>
 #include <cassert>
 #include <cstring>
+#include <cmath>
+#include <type_traits>
+#include <algorithm>
 
 #include <dlfcn.h>
 
@@ -145,7 +148,46 @@ std::string _ttype_to_str(Qnn_TensorType_t ttype) {
 }
 
 
+struct _notify_fn_internal_workload {
+    std::function<void(void*, Qnn_NotifyStatus_t)> fn;
+    void* param;
+};
+
+
+void _notify_fn_internal(void* param, Qnn_NotifyStatus_t status) {
+    auto* _workload = reinterpret_cast<_notify_fn_internal_workload*>(param);
+    auto&& _guard = scope_guard([_workload](){ delete _workload; });
+    (void)_guard;
+    _workload->fn(_workload->param, status);
+}
+
+
+template <class T, size_t TE, class U, size_t UE>
+bool _span_equal(std::span<T, TE> const& s1, std::span<U, UE> const& s2) {
+    if constexpr (TE != UE)
+        return false;
+    else {
+        if (s1.size() != s2.size())
+            return false;
+        return std::equal(s1.begin(), s1.end(), s2.begin(), s2.end());
+    }
+}
+
+
 } // anonymous
+
+
+namespace libsdod {
+
+// defined at the end of this file
+//arguments are such that first is always qnn memory, second is always host
+template <bool Accum, class T>
+void qnn2host(const void* src, T* dst, unsigned int elements, const Qnn_Tensor_t& desc, float scale);
+
+template <bool Accum, class T>
+void host2qnn(void* dst, const T* src, unsigned int elements, const Qnn_Tensor_t& desc, float scale);
+
+}
 
 
 std::shared_ptr<QnnApi> QnnApi::get(QnnBackendType backend) {
@@ -365,6 +407,11 @@ void QnnApi::execute_graph(Qnn_GraphHandle_t graph, std::span<Qnn_Tensor_t> cons
 }
 
 
+void QnnApi::execute_graph_async(Qnn_GraphHandle_t graph, std::span<Qnn_Tensor_t> const& inputs, std::span<Qnn_Tensor_t>& outputs, Qnn_NotifyFn_t notify, void* notify_param) {
+    _generic_qnn_api_call(interface.graphExecuteAsync, "graphExecuteAsync", __func__, __FILE__, STR(__LINE__), graph, inputs.data(), inputs.size(), outputs.data(), outputs.size(), nullptr, nullptr, notify, notify_param);
+}
+
+
 QnnTensor::QnnTensor(QnnTensor&& other) : is_ion(other.is_ion), batch_size(other.batch_size), data(std::move(other.data)), data_size(other.data_size), data_fd(other.data_fd), data_hnd(std::move(other.data_hnd)), slot(other.slot) {
     if (slot.current_tensor == &other)
         slot.current_tensor = this;
@@ -431,7 +478,7 @@ void QnnTensor::activate() const {
     }
 
     slot.current_tensor = this;
-    debug("Memory location {} is now the source of data for slot: {}", data.get(), slot.target.v1.name);
+    debug("Memory location {} is now the source of data for slot: {}", data.get(), get_slot_name());
 }
 
 
@@ -450,7 +497,7 @@ void QnnTensor::deactivate() const {
     slot.target.v1.clientBuf = wrapper;
 
     slot.current_tensor = nullptr;
-    debug("Slot {} is now unbounded, previous memory location: {}", slot.target.v1.name, data.get());
+    debug("Slot {} is now unbounded, previous memory location: {}", get_slot_name(), data.get());
 }
 
 
@@ -469,41 +516,70 @@ QnnTensor::QnnTensor(QnnApi& api, Qnn_ContextHandle_t ctx, graph_slot& slot, uns
         desc.ionInfo.fd = data_fd;
         data_hnd = api.mem_register(ctx, desc);
         is_ion = true;
-        debug("New ION tensor allocated: {}; target: {}, {}, {}", data.get(), slot.target.v1.name, _dtype_to_str(slot.target.v1.dataType), std::span(slot.target.v1.dimensions, slot.target.v1.rank));
+        debug("New ION tensor allocated: {}; target: {}, {}, {}", data.get(), get_slot_name(), _dtype_to_str(slot.target.v1.dataType), std::span(slot.target.v1.dimensions, slot.target.v1.rank));
     } else {
         data = std::shared_ptr<void>(new uint8_t[data_size], [](void* ptr) {
             debug("Freeing memory: {}", ptr);
         });
         debug("Memory allocated: {}, {}", data.get(), data_size);
         is_ion = false;
-        debug("New standard tensor allocated: {}; target: {}, {}, {}", data.get(), slot.target.v1.name, _dtype_to_str(slot.target.v1.dataType), std::span(slot.target.v1.dimensions, slot.target.v1.rank));
+        debug("New standard tensor allocated: {}; target: {}, {}, {}", data.get(), get_slot_name(), _dtype_to_str(slot.target.v1.dataType), std::span(slot.target.v1.dimensions, slot.target.v1.rank));
     }
 }
 
 
-QnnTensor::QnnTensor(QnnTensor const& other, graph_slot& slot) : is_ion(other.is_ion), batch_size(other.batch_size), data(other.data), data_size(other.data_size),
-    data_fd(other.data_fd), data_hnd(other.data_hnd), slot(slot) {
-    debug("New aliased tensor, data location: {} also targets {}, original target: {}", data.get(), slot.target.v1.name, other.slot.target.v1.name);
+QnnTensor::QnnTensor(QnnTensor const& other, graph_slot& slot, bool strict_shape) : is_ion(other.is_ion), batch_size(other.batch_size),
+    data(other.data), data_size(other.data_size), data_fd(other.data_fd), data_hnd(other.data_hnd), slot(slot) {
+    if (slot.target.v1.dataFormat != other.slot.target.v1.dataFormat ||
+        slot.target.v1.dataType != other.slot.target.v1.dataType ||
+        (
+            !_span_equal(std::span(slot.target.v1.dimensions, slot.target.v1.rank), std::span(other.slot.target.v1.dimensions, other.slot.target.v1.rank)) &&
+            (strict_shape || get_num_elements(1) != other.get_num_elements(1)))
+        )
+        throw libsdod_exception(ErrorCode::INVALID_ARGUMENT, format("Cannot target QNN tensor {} with a memory allocation for tensor {}, incompatible tensor types", get_slot_name(), other.get_slot_name()), __func__, __FILE__, STR(__LINE__));
+    debug("New aliased tensor, data location: {} also targets {}, original target: {}", data.get(), get_slot_name(), other.get_slot_name());
 }
 
 
-void QnnTensor::set_data(std::vector<float> const& buffer) {
-    throw libsdod_exception(ErrorCode::INTERNAL_ERROR, "Not implemented", __func__, __FILE__, STR(__LINE__));
-}
+#define _GENERIC_DATA_COPY(fn, accum, scale) \
+    auto needed = get_num_elements(batch_size); \
+    if (needed > buffer.size()) \
+        throw libsdod_exception(ErrorCode::INVALID_ARGUMENT, format("Insufficient host vector! Got: {}, requires: {}", buffer.size(), needed), __func__, __FILE__, STR(__LINE__)); \
+    fn<accum>(data.get(), buffer.data(), buffer.size(), slot.target, scale)
 
 
-void QnnTensor::set_data(std::vector<uint32_t> const& buffer) {
-    throw libsdod_exception(ErrorCode::INTERNAL_ERROR, "Not implemented", __func__, __FILE__, STR(__LINE__));
-}
+void QnnTensor::set_data(std::vector<float> const& buffer) { _GENERIC_DATA_COPY(host2qnn, false, 0.0f); }
+void QnnTensor::set_data(std::vector<uint16_t> const& buffer) { _GENERIC_DATA_COPY(host2qnn, false, 0.0f); }
+void QnnTensor::set_data(std::vector<uint32_t> const& buffer) { _GENERIC_DATA_COPY(host2qnn, false, 0.0f); }
+
+void QnnTensor::get_data(std::vector<float>& buffer) const { _GENERIC_DATA_COPY(qnn2host, false, 0.0f); }
+void QnnTensor::get_data(std::vector<uint16_t>& buffer) const { _GENERIC_DATA_COPY(qnn2host, false, 0.0f); }
+void QnnTensor::get_data(std::vector<uint32_t>& buffer) const { _GENERIC_DATA_COPY(qnn2host, false, 0.0f); }
+
+void QnnTensor::get_data(std::vector<float>& buffer, float scale) const { _GENERIC_DATA_COPY(qnn2host, true, scale); }
+
+std::string QnnTensor::get_slot_name() const { return format("{}:{}", slot.graph.get_name(), slot.target.v1.name); }
 
 
-void QnnTensor::get_data(std::vector<float>& buffer) {
-    throw libsdod_exception(ErrorCode::INTERNAL_ERROR, "Not implemented", __func__, __FILE__, STR(__LINE__));
-}
+QnnGraph::QnnGraph(QnnGraph::CtorToken&& token)
+    : orig_name(token.orig_name), inputs(std::span(token.inputs, token.num_inputs)), outputs(std::span(token.outputs, token.num_outputs)), 
+      graph(token.graph), ctx(std::move(token.ctx)), api(std::move(token.api)), name(token.orig_name) {
+    if (is_enabled(LogLevel::DEBUG)) {
+        debug("New graph: {} @ {}", orig_name, this);
+        debug("    Num inputs: {}", inputs.size());
+        for (auto&& t : this->inputs) {
+            debug("        {}: {}, {}, {}, {}", t.v1.name, _format_to_str(t.v1.dataFormat), _dtype_to_str(t.v1.dataType), _ttype_to_str(t.v1.type), std::span(t.v1.dimensions, t.v1.rank));
+        }
+        debug("    Num outputs: {}", outputs.size());
+        for (auto&& t : this->outputs) {
+            debug("        {}: {}, {}, {}, {}", t.v1.name, _format_to_str(t.v1.dataFormat), _dtype_to_str(t.v1.dataType), _ttype_to_str(t.v1.type), std::span(t.v1.dimensions, t.v1.rank));
+        }
+    }
 
-
-void QnnTensor::get_data(std::vector<uint32_t>& buffer) {
-    throw libsdod_exception(ErrorCode::INTERNAL_ERROR, "Not implemented", __func__, __FILE__, STR(__LINE__));
+    for (auto&& i : inputs)
+        input_slots.emplace_back(graph_slot{ .graph=*this, .target=i, .current_tensor=nullptr });
+    for (auto&& o : outputs)
+        output_slots.emplace_back(graph_slot{ .graph=*this, .target=o, .current_tensor=nullptr });
 }
 
 
@@ -520,10 +596,10 @@ QnnTensor QnnGraph::allocate_input(unsigned int idx, unsigned batch, bool activa
 }
 
 
-QnnTensor QnnGraph::attach_input(unsigned int idx, QnnTensor const& t, bool activate) {
+QnnTensor QnnGraph::attach_input(unsigned int idx, QnnTensor const& t, bool activate, bool strict_shape) {
     if (idx >= inputs.size())
         throw libsdod_exception(ErrorCode::INTERNAL_ERROR, format("Input index too large: {}", idx), __func__, __FILE__, STR(__LINE__));
-    QnnTensor ret{ t, input_slots[idx] };
+    QnnTensor ret{ t, input_slots[idx], strict_shape };
     if (activate)
         ret.activate();
     return ret;
@@ -543,10 +619,10 @@ QnnTensor QnnGraph::allocate_output(unsigned int idx, unsigned batch, bool activ
 }
 
 
-QnnTensor QnnGraph::attach_output(unsigned int idx, QnnTensor const& t, bool activate) {
+QnnTensor QnnGraph::attach_output(unsigned int idx, QnnTensor const& t, bool activate, bool strict_shape) {
     if (idx >= outputs.size())
         throw libsdod_exception(ErrorCode::INTERNAL_ERROR, format("Outputs index too large: {}", idx), __func__, __FILE__, STR(__LINE__));
-    QnnTensor ret{ t, output_slots[idx] };
+    QnnTensor ret{ t, output_slots[idx], strict_shape };
     if (activate)
         ret.activate();
     return ret;
@@ -577,10 +653,10 @@ void QnnGraph::verify() {
         }
         else if (batch_sizes.size() > 1) {
             for (auto&& i : batch_sizes)
-                batch_info += format("\n    {}: {}", i.first, i.second);
+                batch_info += format("\n        {}: {}", i.first, i.second);
         }
         throw libsdod_exception(ErrorCode::RUNTIME_ERROR,
-            format("Graph verification failed! At least one input or output tensor has not been assigned memory location and/or operates on different batch size!\n    Missing allocations: {}\n    Conflicting batch size: {}\n", missing, std::move(batch_info)),
+            format("Verification failed for graph: {}! At least one input or output tensor has not been assigned memory location and/or operates on different batch size!\n    Missing allocations: {}\n    Batch sizes: {}\n", name, missing, std::move(batch_info)),
             __func__, __FILE__, STR(__LINE__));
     }
 }
@@ -591,50 +667,19 @@ void QnnGraph::execute() {
 }
 
 
-QnnGraph::QnnGraph(qnn_hnd<Qnn_ContextHandle_t> ctx, std::shared_ptr<QnnApi> api, const char* name, Qnn_Tensor_t* inputs, unsigned int num_inputs,
-    Qnn_Tensor_t* outputs, unsigned int num_outputs, Qnn_GraphHandle_t graph)
-    : name(name), inputs(std::span(inputs, num_inputs)), outputs(std::span(outputs, num_outputs)), graph(graph), ctx(ctx), api(api) {
-    if (is_enabled(LogLevel::DEBUG)) {
-        debug("New graph: {}", name);
-        debug("    Num inputs: {}", num_inputs);
-        for (auto&& t : this->inputs) {
-            debug("        {}: {}, {}, {}, {}", t.v1.name, _format_to_str(t.v1.dataFormat), _dtype_to_str(t.v1.dataType), _ttype_to_str(t.v1.type), std::span(t.v1.dimensions, t.v1.rank));
-        }
-        debug("    Num outputs: {}", num_outputs);
-        for (auto&& t : this->outputs) {
-            debug("        {}: {}, {}, {}, {}", t.v1.name, _format_to_str(t.v1.dataFormat), _dtype_to_str(t.v1.dataType), _ttype_to_str(t.v1.type), std::span(t.v1.dimensions, t.v1.rank));
-        }
+void QnnGraph::execute_async(std::function<void(void*, Qnn_NotifyStatus_t)> notify, void* notify_param) {
+    if (!notify) {
+        if (notify_param)
+            throw libsdod_exception(ErrorCode::INVALID_ARGUMENT, "notify_params provided but notify function is empty!", __func__, __FILE__, STR(__LINE__));
+        return api->execute_graph_async(graph, inputs, outputs, nullptr, nullptr);
     }
 
-    for (auto&& i : range(num_inputs))
-        input_slots.emplace_back(graph_slot{ .target=inputs[i], .current_tensor=nullptr });
-    for (auto&& i : range(num_outputs))
-        output_slots.emplace_back(graph_slot{ .target=outputs[i], .current_tensor=nullptr });
-
-    if (api->get_backend_type() == QnnBackendType::HTP) {
-        // QnnHtpGraph_CustomConfig_t vtcm;
-        // vtcm.option = QNN_HTP_GRAPH_CONFIG_OPTION_VTCM_SIZE;
-        // vtcm.vtcmSizeInMB = 8;
-
-        // QnnHtpGraph_CustomConfig_t hvx;
-        // hvx.option = QNN_HTP_GRAPH_CONFIG_OPTION_NUM_HVX_THREADS;
-        // hvx.numHvxThreads = 4;
-
-        // QnnGraph_Config_t opt1;
-        // opt1.option = QNN_GRAPH_CONFIG_OPTION_CUSTOM;
-        // opt1.customConfig = &hvx;
-
-        // QnnGraph_Config_t opt2;
-        // opt1.option = QNN_GRAPH_CONFIG_OPTION_CUSTOM;
-        // opt1.customConfig = &vtcm;
-        // const QnnGraph_Config_t* options[] = { &opt1, &opt2, nullptr };
-
-        // api->set_graph_config(graph, options);
-    }
+    auto* _param = new _notify_fn_internal_workload{ .fn=std::move(notify), .param=notify_param };
+    api->execute_graph_async(graph, inputs, outputs, _notify_fn_internal, _param);
 }
 
 
-QnnContext::QnnContext(qnn_hnd<Qnn_ContextHandle_t> ctx, std::vector<QnnGraph>&& graphs) : ctx(ctx), graphs(std::move(graphs)) {
+QnnContext::QnnContext(qnn_hnd<Qnn_ContextHandle_t> ctx, std::list<QnnGraph>&& graphs) : ctx(ctx), graphs(std::move(graphs)) {
 }
 
 
@@ -797,7 +842,7 @@ graph_refs QnnBackend::load_context(std::string const& context_blob) {
     auto&& context_hnd = api->create_context(buffer, backend_hnd.get(), device_hnd.get(), nullptr);
     debug("Context handler created");
 
-    std::vector<QnnGraph> graphs;
+    std::list<QnnGraph> graphs;
     graph_refs ret;
 
     debug("Investigating context binary info...");
@@ -819,13 +864,13 @@ graph_refs QnnBackend::load_context(std::string const& context_blob) {
         auto&& graph_info = graphs_info[i];
         if (graph_info.version == QNN_SYSTEM_CONTEXT_GRAPH_INFO_VERSION_1) {
             auto&& graph_hnd = api->retrieve_graph(context_hnd.get(), graph_info.graphInfoV1.graphName);
-            graphs.emplace_back(QnnGraph(context_hnd, api, graph_info.graphInfoV1.graphName, graph_info.graphInfoV1.graphInputs, graph_info.graphInfoV1.numGraphInputs, graph_info.graphInfoV1.graphOutputs, graph_info.graphInfoV1.numGraphOutputs, graph_hnd));
+            graphs.emplace_back(QnnGraph::CtorToken{ context_hnd, api, graph_info.graphInfoV1.graphName, graph_info.graphInfoV1.graphInputs, graph_info.graphInfoV1.numGraphInputs, graph_info.graphInfoV1.graphOutputs, graph_info.graphInfoV1.numGraphOutputs, graph_hnd });
             ret.push_back(graphs.back());
         } else
             throw libsdod_exception(ErrorCode::INVALID_ARGUMENT, format("Unexpected graph info version: {}", graph_info.version), __func__, __FILE__, STR(__LINE__));
     }
 
-    ctx.emplace_back(QnnContext(std::move(context_hnd), std::move(graphs)));
+    ctx.emplace_back(QnnContext{ std::move(context_hnd), std::move(graphs) });
     return ret;
 }
 
@@ -835,6 +880,126 @@ graph_refs QnnBackend::load_model(std::string const& model_so) {
 }
 
 
-// tensor_refs QnnBackend::run(graph_ref graph, tensor_refs& inputs) {
-//     throw libsdod_exception(ErrorCode::INTERNAL_ERROR, "Not implemented", __func__, __FILE__, STR(__LINE__));
-// }
+/*
+ * DATA MOVING FUNCTIONS BELOW
+*/
+
+
+namespace libsdod { namespace {
+
+
+template <bool Accum, class T, class U>
+void tf2any(T* out, const U* in, int32_t offset, float scale, std::size_t elements, float accum_scale) {
+    static_assert(std::is_unsigned<U>::value, "tf2float supports only unsigned types!");
+    double offset_d = static_cast<double>(offset);
+    for (auto i : range(elements)) {
+        double quant = static_cast<double>(in[i]);
+        if constexpr (Accum)
+            out[i] += static_cast<T>(accum_scale * static_cast<float>((quant + offset_d) * scale));
+        else
+            out[i] = static_cast<T>((quant + offset_d) * scale);
+    }
+}
+
+template <bool Accum, class T, class U>
+void any2tf(T* out, const U* in, int32_t offset, float scale, std::size_t elements, float accum_scale) {
+    static_assert(std::is_unsigned<T>::value, "float2tf supports only unsigned types!");
+
+    std::size_t bits = sizeof(T) * 8;
+    double max_in = double((1 << bits) - 1);
+    double enc_min = offset * scale;
+    double enc_max = (max_in + offset) * scale;
+    double enc_range = enc_max - enc_min;
+    int lower = 0;
+    int upper = (int)max_in;
+
+    T quant_scale;
+    if constexpr (Accum) {
+        quant_scale = static_cast<T>(std::clamp<int>(std::round(max_in * (accum_scale - enc_min) / enc_range), lower, upper));
+    }
+
+    for (auto i : range(elements)) {
+        int quant = std::clamp<int>(std::round(max_in * (static_cast<double>(in[i]) - enc_min) / enc_range), lower, upper);
+        if constexpr (Accum)
+            out[i] += quant_scale * static_cast<T>(quant);
+        else
+            out[i] = static_cast<T>(quant);
+    }
+}
+
+template <bool Accum, class T, class U>
+void simple_cast(T* dst, const U* src, std::size_t elements, float scale) {
+    if constexpr (Accum) {
+        for (auto i : range(elements))
+            dst[i] += static_cast<T>(static_cast<float>(src[i]) * scale);
+    } else {
+        if constexpr (std::is_same<T, U>::value)
+            std::memcpy(dst, src, elements*sizeof(T));
+        else {
+            for (auto i : range(elements))
+                dst[i] = static_cast<T>(src[i]);
+        }
+    }
+}
+
+}
+
+
+template <bool Accum, class T>
+void qnn2host(const void* src, T* dst, unsigned int elements, const Qnn_Tensor_t& desc, float scale) {
+    switch (desc.v1.dataType) {
+    case QNN_DATATYPE_UFIXED_POINT_8:
+        tf2any<Accum>(dst, reinterpret_cast<const uint8_t*>(src), desc.v1.quantizeParams.scaleOffsetEncoding.offset, desc.v1.quantizeParams.scaleOffsetEncoding.scale, elements, scale);
+        break;
+
+    case QNN_DATATYPE_UFIXED_POINT_16:
+        tf2any<Accum>(dst, reinterpret_cast<const uint16_t*>(src), desc.v1.quantizeParams.scaleOffsetEncoding.offset, desc.v1.quantizeParams.scaleOffsetEncoding.scale, elements, scale);
+        break;
+
+    case QNN_DATATYPE_FLOAT_32: return simple_cast<Accum>(dst, reinterpret_cast<const float*>(src), elements, scale);
+
+    case QNN_DATATYPE_UINT_8: return simple_cast<Accum>(dst, reinterpret_cast<const uint8_t*>(src), elements, scale);
+    case QNN_DATATYPE_UINT_16: return simple_cast<Accum>(dst, reinterpret_cast<const uint16_t*>(src), elements, scale);
+    case QNN_DATATYPE_UINT_32: return simple_cast<Accum>(dst, reinterpret_cast<const uint32_t*>(src), elements, scale);
+    case QNN_DATATYPE_UINT_64: return simple_cast<Accum>(dst, reinterpret_cast<const uint64_t*>(src), elements, scale);
+
+    case QNN_DATATYPE_INT_8: return simple_cast<Accum>(dst, reinterpret_cast<const int8_t*>(src), elements, scale);
+    case QNN_DATATYPE_INT_16: return simple_cast<Accum>(dst, reinterpret_cast<const int16_t*>(src), elements, scale);
+    case QNN_DATATYPE_INT_32: return simple_cast<Accum>(dst, reinterpret_cast<const int32_t*>(src), elements, scale);
+    case QNN_DATATYPE_INT_64: return simple_cast<Accum>(dst, reinterpret_cast<const int64_t*>(src), elements, scale);
+
+    default:
+        throw libsdod_exception(ErrorCode::INVALID_ARGUMENT, format("Unexpected source tensor data type when copying to a host buffer: {}", _dtype_to_str(desc.v1.dataType)), __func__, __FILE__, STR(__LINE__));
+    }
+}
+
+
+template <bool Accum, class T>
+void host2qnn(void* dst, const T* src, unsigned int elements, const Qnn_Tensor_t& desc, float scale) {
+    switch (desc.v1.dataType) {
+    case QNN_DATATYPE_UFIXED_POINT_8:
+        any2tf<Accum>(reinterpret_cast<uint8_t*>(dst), src, desc.v1.quantizeParams.scaleOffsetEncoding.offset, desc.v1.quantizeParams.scaleOffsetEncoding.scale, elements, scale);
+        break;
+
+    case QNN_DATATYPE_UFIXED_POINT_16:
+        any2tf<Accum>(reinterpret_cast<uint16_t*>(dst), src, desc.v1.quantizeParams.scaleOffsetEncoding.offset, desc.v1.quantizeParams.scaleOffsetEncoding.scale, elements, scale);
+        break;
+
+    case QNN_DATATYPE_FLOAT_32: return simple_cast<Accum>(reinterpret_cast<float*>(dst), src, elements, scale);
+
+    case QNN_DATATYPE_UINT_8: return simple_cast<Accum>(reinterpret_cast<uint8_t*>(dst), src, elements, scale);
+    case QNN_DATATYPE_UINT_16: return simple_cast<Accum>(reinterpret_cast<uint16_t*>(dst), src, elements, scale);
+    case QNN_DATATYPE_UINT_32: return simple_cast<Accum>(reinterpret_cast<uint32_t*>(dst), src, elements, scale);
+    case QNN_DATATYPE_UINT_64: return simple_cast<Accum>(reinterpret_cast<uint64_t*>(dst), src, elements, scale);
+
+    case QNN_DATATYPE_INT_8: return simple_cast<Accum>(reinterpret_cast<int8_t*>(dst), src, elements, scale);
+    case QNN_DATATYPE_INT_16: return simple_cast<Accum>(reinterpret_cast<int16_t*>(dst), src, elements, scale);
+    case QNN_DATATYPE_INT_32: return simple_cast<Accum>(reinterpret_cast<int32_t*>(dst), src, elements, scale);
+    case QNN_DATATYPE_INT_64: return simple_cast<Accum>(reinterpret_cast<int64_t*>(dst), src, elements, scale);
+
+    default:
+        throw libsdod_exception(ErrorCode::INVALID_ARGUMENT, format("Unexpected destination tensor data type when copying a host buffer: {}", _dtype_to_str(desc.v1.dataType)), __func__, __FILE__, STR(__LINE__));
+    }
+}
+
+}

@@ -60,14 +60,22 @@ private:
     std::shared_ptr<QnnBackend> _qnn;
     std::optional<StableDiffusionModel> _model;
 
-    std::vector<unsigned int> prompt_tokens;
-    std::vector<float> time_enc;
-    std::vector<float> x_curr;
-    std::vector<float> y_cond;
-    std::vector<float> y_uncond;
+    std::vector<unsigned int> tokens_host;
+    std::vector<float> x_host;
+    std::vector<float> y_host;
+    std::vector<float> img_host;
 
-    std::vector<std::vector<float>> t_schedule; // sequence of encoded timesteps
-    tensor_list tensors;
+    std::vector<std::vector<float>> t_embeddings; // sequence of encoded timesteps
+
+    unsigned int unet_dim = 1280; // TODO: expose as arg?
+
+    std::optional<QnnTensor> tokens;
+    std::optional<QnnTensor> x;
+    std::optional<QnnTensor> t;
+    std::optional<QnnTensor> y;
+    std::optional<QnnTensor> img;
+
+    tensor_list other_tensors;
 };
 
 }

@@ -7,6 +7,7 @@
 #include <string>
 #include <memory>
 #include <optional>
+#include <functional>
 
 #include <QnnInterface.h>
 #include <System/QnnSystemInterface.h>
@@ -22,6 +23,7 @@ class QnnContext;
 class QnnBackend;
 
 struct graph_slot {
+    QnnGraph& graph;
     Qnn_Tensor_t& target;
     const QnnTensor* current_tensor;
 };
@@ -30,7 +32,7 @@ template <class T>
 using qnn_hnd = std::shared_ptr<std::remove_pointer_t<T>>;
 using graph_ref = std::add_lvalue_reference_t<QnnGraph>;
 using graph_refs = std::list<std::reference_wrapper<QnnGraph>>;
-using tensor_list = std::vector<QnnTensor>;
+using tensor_list = std::list<QnnTensor>;
 using graph_slots = std::vector<graph_slot>;
 
 
@@ -78,6 +80,7 @@ public:
     bool has_ion() const { return bool(cdsp_dl); }
 
     void execute_graph(Qnn_GraphHandle_t graph, std::span<Qnn_Tensor_t> const& inputs, std::span<Qnn_Tensor_t>& outputs);
+    void execute_graph_async(Qnn_GraphHandle_t graph, std::span<Qnn_Tensor_t> const& inputs, std::span<Qnn_Tensor_t>& outputs, Qnn_NotifyFn_t notify, void* notify_params);
 
 private:
     QnnApi(QnnBackendType backend);
@@ -118,14 +121,20 @@ public:
     bool is_floating_point() const { return is_floating_point(slot.target); }
 
     void set_data(std::vector<float> const& buffer);
+    void set_data(std::vector<uint16_t> const& buffer);
     void set_data(std::vector<uint32_t> const& buffer);
 
-    void get_data(std::vector<float>& buffer);
-    void get_data(std::vector<uint32_t>& buffer);
+    void get_data(std::vector<float>& buffer) const; //copy data
+    void get_data(std::vector<uint16_t>& buffer) const;
+    void get_data(std::vector<uint32_t>& buffer) const;
+
+    void get_data(std::vector<float>& buffer, float scale) const; //accumulate scaled
+
+    std::string get_slot_name() const;
 
 private:
     QnnTensor(QnnApi& api, Qnn_ContextHandle_t ctx, graph_slot& slot, unsigned int batch_size=1); //allocate new
-    QnnTensor(QnnTensor const& other, graph_slot& slot); //reuse the same allocation for different input/output slot
+    QnnTensor(QnnTensor const& other, graph_slot& slot, bool strict_shape); //reuse the same allocation for different input/output slot
 
     bool is_ion = false;
     unsigned int batch_size = 0;
@@ -141,26 +150,40 @@ private:
 
 class QnnGraph {
     friend class QnnBackend;
+private:
+    struct CtorToken {
+        qnn_hnd<Qnn_ContextHandle_t> ctx;
+        std::shared_ptr<QnnApi> api;
+        const char* orig_name;
+        Qnn_Tensor_t* inputs;
+        unsigned int num_inputs;
+        Qnn_Tensor_t* outputs;
+        unsigned int num_outputs;
+        Qnn_GraphHandle_t graph;
+    };
+
 public:
+    explicit QnnGraph(CtorToken&& token);
+    QnnGraph(QnnGraph&& other) = delete;
+
     QnnTensor allocate_input(unsigned int idx, unsigned batch=1, bool activate=true);
-    QnnTensor attach_input(unsigned int idx, QnnTensor const& t, bool activate=true);
+    QnnTensor attach_input(unsigned int idx, QnnTensor const& t, bool activate=true, bool strict_shape=true);
 
     QnnTensor allocate_output(unsigned int idx, unsigned batch=1, bool activate=true);
-    QnnTensor attach_output(unsigned int idx, QnnTensor const& t, bool activate=true);
+    QnnTensor attach_output(unsigned int idx, QnnTensor const& t, bool activate=true, bool strict_shape=true);
 
     auto get_num_inputs() const { return inputs.size(); }
     auto get_num_outputs() const { return outputs.size(); }
 
     void verify();
     void execute();
+    void execute_async(std::function<void(void*, Qnn_NotifyStatus_t)> notify = std::function<void(void*, Qnn_NotifyStatus_t)>(), void* notify_param = nullptr);
 
-    auto get_name() const { return name; }
+    void set_name(std::string s) { name.swap(s); }
+    auto const& get_name() const { return name; }
 
 private:
-    QnnGraph(qnn_hnd<Qnn_ContextHandle_t> ctx, std::shared_ptr<QnnApi> api, const char* name, Qnn_Tensor_t* inputs, unsigned int num_inputs,
-        Qnn_Tensor_t* outputs, unsigned int num_outputs, Qnn_GraphHandle_t graph);
-
-    const char* name;
+    const char* orig_name;
     std::span<Qnn_Tensor_t> inputs;
     std::span<Qnn_Tensor_t> outputs;
 
@@ -170,6 +193,8 @@ private:
     Qnn_GraphHandle_t graph;
     qnn_hnd<Qnn_ContextHandle_t>::weak_type ctx;
     std::shared_ptr<QnnApi> api;
+
+    std::string name;
 };
 
 
@@ -180,10 +205,10 @@ public:
     QnnContext(QnnContext&& other) = default;
 
 private:
-    QnnContext(qnn_hnd<Qnn_ContextHandle_t> ctx, std::vector<QnnGraph>&& graphs);
+    QnnContext(qnn_hnd<Qnn_ContextHandle_t> ctx, std::list<QnnGraph>&& graphs);
 
     qnn_hnd<Qnn_ContextHandle_t> ctx;
-    std::vector<QnnGraph> graphs;
+    std::list<QnnGraph> graphs;
 };
 
 

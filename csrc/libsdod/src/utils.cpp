@@ -61,4 +61,27 @@ bool read_file_content(std::string const& path, std::vector<unsigned char>& buff
     return true;
 }
 
+
+scope_guard::scope_guard(std::function<void()> const& init, std::function<void()> deinit) {
+    if (init)
+        init();
+    this->deinit.swap(deinit);
+}
+
+
+scope_guard::scope_guard(std::function<void()> deinit) : deinit(std::move(deinit)) {
+}
+
+
+scope_guard::scope_guard(scope_guard&& other) : deinit(std::move(other.deinit)) {
+
+}
+
+
+scope_guard::~scope_guard() {
+    if (deinit)
+        deinit();
+}
+
+
 }

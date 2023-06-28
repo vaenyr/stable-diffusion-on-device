@@ -62,7 +62,7 @@ inline std::enable_if_t<is_valid_std_to_string_v<T&&>, std::string> to_string(T&
 }
 
 template <class T>
-inline std::enable_if_t<std::is_pointer_v<std::remove_reference_t<T>>, std::string> to_string(T&& t) {
+inline std::enable_if_t<std::is_pointer<std::remove_reference_t<T>>::value, std::string> to_string(T&& t) {
     return hex(reinterpret_cast<const std::uintptr_t>(t));
 }
 
@@ -186,6 +186,20 @@ template <class T>
 auto range(T&& min, T&& max) {
     return details::range_t<std::remove_reference_t<T>>{ .min=std::forward<T>(min), .max=std::forward<T>(max) };
 }
+
+
+struct scope_guard {
+    scope_guard(std::function<void()> const& init, std::function<void()> deinit);
+    scope_guard(std::function<void()> deinit);
+    scope_guard(scope_guard&& other);
+    scope_guard(scope_guard const& other) = delete;
+    ~scope_guard();
+
+    scope_guard operator=(scope_guard const& other) = delete;
+    scope_guard operator=(scope_guard&& other) = delete;
+
+    std::function<void()> deinit;
+};
 
 }
 
