@@ -4,7 +4,7 @@
 
 #include <chrono>
 
-using namespace libsd;
+using namespace libsdod;
 
 
 Context::Context(std::string const& models_dir, unsigned int latent_channels, unsigned int latent_spatial, unsigned int upscale_factor, LogLevel log_level)
@@ -42,7 +42,7 @@ void Context::load_models() {
         auto&& path = models_dir + "/" + name;
         auto&& graphs = _qnn->load_context(path);
         if (graphs.empty())
-            throw libsd_exception(ErrorCode::INVALID_ARGUMENT, format("Deserialized context {} does not contain any graphs!", path), "load_models", __FILE__, STR(__LINE__));
+            throw libsdod_exception(ErrorCode::INVALID_ARGUMENT, format("Deserialized context {} does not contain any graphs!", path), "load_models", __FILE__, STR(__LINE__));
         if (graphs.size() > 1)
             info("Warning: deserialized context {} contains more than 1 graph {}, only the first one will be used", path, graphs.size());
         return graphs.front();
@@ -171,11 +171,11 @@ Buffer<unsigned char> Context::allocate_output() const {
 
 Buffer<unsigned char> Context::reuse_buffer(unsigned char* buffer, unsigned int buffer_len) const {
     if (!buffer)
-        throw libsd_exception(ErrorCode::INVALID_ARGUMENT, "Asked to reuse a nullptr buffer", __func__, __FILE__, STR(__LINE__));
+        throw libsdod_exception(ErrorCode::INVALID_ARGUMENT, "Asked to reuse a nullptr buffer", __func__, __FILE__, STR(__LINE__));
 
     std::size_t required_len = 3 * latent_spatial * latent_spatial * upscale_factor * upscale_factor;
     if (buffer_len < required_len)
-        throw libsd_exception(ErrorCode::INVALID_ARGUMENT, "Provided buffer is too small, missing " + std::to_string(required_len - buffer_len) + " bytes", __func__, __FILE__, STR(__LINE__));
+        throw libsdod_exception(ErrorCode::INVALID_ARGUMENT, "Provided buffer is too small, missing " + std::to_string(required_len - buffer_len) + " bytes", __func__, __FILE__, STR(__LINE__));
 
     return Buffer<unsigned char>(buffer, buffer_len);
 }

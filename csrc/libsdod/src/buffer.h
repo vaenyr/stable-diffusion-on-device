@@ -1,11 +1,11 @@
-#ifndef LIBSD_BUFFER_H
-#define LIBSD_BUFFER_H
+#ifndef LIBSDOD_BUFFER_H
+#define LIBSDOD_BUFFER_H
 
 #include <cstddef>
 #include <memory>
 
 
-namespace libsd {
+namespace libsdod {
 
 template <class T>
 class Buffer;
@@ -45,4 +45,4 @@ public:
 
 }
 
-#endif // LIBSD_BUFFER_H
+#endif // LIBSDOD_BUFFER_H

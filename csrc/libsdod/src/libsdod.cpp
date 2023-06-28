@@ -1,4 +1,4 @@
-#include "libsd.h"
+#include "libsdod.h"
 
 #include "errors.h"
 #include "context.h"
@@ -6,21 +6,21 @@
 
 #include <cstring>
 
-#define LIBSD_VERSION_MAJOR 1
-#define LIBSD_VERSION_MINOR 0
-#define LIBSD_VERSION_PATCH 0
+#define LIBSDOD_VERSION_MAJOR 1
+#define LIBSDOD_VERSION_MINOR 0
+#define LIBSDOD_VERSION_PATCH 0
 
-#define LIBSD_VERSION_STR (#LIBSD_VERSION_MAJOR "." #LIBSD_VERSION_MINOR "." #LIBSD_VERSION_PATCH)
-#define LIBSD_VERSION_INT (LIBSD_VERSION_MAJOR*10000 + LIBSD_VERSION_MINOR*100 + LIBSD_VERSION_PATCH)
-#define LIBSD_CONTEXT_MAGIC_HEADER 0x00534443
-#define LIBSD_DEFAULT_CONTEXT_VERSION 1
+#define LIBSDOD_VERSION_STR (#LIBSDOD_VERSION_MAJOR "." #LIBSDOD_VERSION_MINOR "." #LIBSDOD_VERSION_PATCH)
+#define LIBSDOD_VERSION_INT (LIBSDOD_VERSION_MAJOR*10000 + LIBSDOD_VERSION_MINOR*100 + LIBSDOD_VERSION_PATCH)
+#define LIBSDOD_CONTEXT_MAGIC_HEADER 0x00534443
+#define LIBSDOD_DEFAULT_CONTEXT_VERSION 1
 
 
-namespace libsd {
+namespace libsdod {
 
 struct CAPI_Context_Handler {
-    unsigned int magic_info = LIBSD_CONTEXT_MAGIC_HEADER;
-    unsigned int context_version = LIBSD_DEFAULT_CONTEXT_VERSION;
+    unsigned int magic_info = LIBSDOD_CONTEXT_MAGIC_HEADER;
+    unsigned int context_version = LIBSDOD_DEFAULT_CONTEXT_VERSION;
     unsigned int ref_count = 0;
     Context* cptr = nullptr;
 };
@@ -49,9 +49,9 @@ ErrorCode _error(ErrorCode code, Context* c, T&& message, const char* func, cons
     if (context == nullptr) \
         return ERROR(ErrorCode::INVALID_CONTEXT, "context is nullptr"); \
     auto hnd = reinterpret_cast<CAPI_Context_Handler*>(context); \
-    if (hnd->magic_info != LIBSD_CONTEXT_MAGIC_HEADER) \
+    if (hnd->magic_info != LIBSDOD_CONTEXT_MAGIC_HEADER) \
         return ERROR(ErrorCode::INVALID_CONTEXT, "context magic header mismatch! got: " + std::to_string(hnd->magic_info)); \
-    if (hnd->context_version != LIBSD_DEFAULT_CONTEXT_VERSION) \
+    if (hnd->context_version != LIBSDOD_DEFAULT_CONTEXT_VERSION) \
         return ERROR(ErrorCode::INVALID_CONTEXT, "context version mismatch! got: " + std::to_string(hnd->context_version)); \
     if (hnd->ref_count == 0) \
         return ERROR(ErrorCode::INVALID_CONTEXT, "context has been released!"); \
@@ -93,7 +93,7 @@ static ErrorCode setup_impl(void** context, const char* models_dir, unsigned int
         cptr->prepare_buffers();
         cptr->prepare_solver();
         cptr->prepare_schedule(steps);
-    } catch (libsd_exception const& e) {
+    } catch (libsdod_exception const& e) {
         return _error(e.code(), cptr, e.reason(), e.func(), e.file(), e.line());
     } catch (std::exception const& e) {
         return ERROR(ErrorCode::INTERNAL_ERROR, e.what());
@@ -108,7 +108,7 @@ static ErrorCode set_steps_impl(void* context, unsigned int steps) {
     TRY_RETRIEVE_CONTEXT;
     try {
         cptr->prepare_schedule(steps);
-    } catch (libsd_exception const& e) {
+    } catch (libsdod_exception const& e) {
         return _error(e.code(), cptr, e.reason(), e.func(), e.file(), e.line());
     } catch (std::exception const& e) {
         return ERROR(ErrorCode::INTERNAL_ERROR, e.what());
@@ -126,7 +126,7 @@ static ErrorCode set_log_level_impl(void* context, unsigned int log_level) {
 
     try {
         cptr->get_logger().set_level(static_cast<LogLevel>(log_level));
-    } catch (libsd_exception const& e) {
+    } catch (libsdod_exception const& e) {
         return _error(e.code(), cptr, e.reason(), e.func(), e.file(), e.line());
     } catch (std::exception const& e) {
         return ERROR(ErrorCode::INTERNAL_ERROR, e.what());
@@ -167,7 +167,7 @@ static ErrorCode generate_image_impl(void* context, const char* prompt, float gu
         *image_out = out.data_ptr();
         *image_buffer_size = out.data_len();
         out.own(false);
-    } catch (libsd_exception const& e) {
+    } catch (libsdod_exception const& e) {
         return _error(e.code(), cptr, e.reason(), e.func(), e.file(), e.line());
     } catch (std::exception const& e) {
         return ERROR(ErrorCode::INTERNAL_ERROR, e.what());
@@ -192,8 +192,8 @@ static const char* get_last_error_extra_info_impl(int errorcode, void* context) 
     ErrorTable tab = nullptr;
     if (context && errorcode != std::underlying_type_t<ErrorCode>(ErrorCode::INVALID_CONTEXT)) {
         auto hnd = reinterpret_cast<CAPI_Context_Handler*>(context);
-        if (hnd->magic_info == LIBSD_CONTEXT_MAGIC_HEADER
-            && hnd->context_version == LIBSD_DEFAULT_CONTEXT_VERSION
+        if (hnd->magic_info == LIBSDOD_CONTEXT_MAGIC_HEADER
+            && hnd->context_version == LIBSDOD_DEFAULT_CONTEXT_VERSION
             && hnd->ref_count > 0
             && hnd->cptr != nullptr)
             tab = hnd->cptr->get_error_table();
@@ -206,36 +206,36 @@ static const char* get_last_error_extra_info_impl(int errorcode, void* context) 
 
 extern "C" {
 
-LIBSD_API int libsd_setup(void** context, const char* models_dir, unsigned int latent_channels, unsigned int latent_spatial, unsigned int upscale_factor, unsigned int steps, unsigned int log_level) {
-    return static_cast<int>(libsd::setup_impl(context, models_dir, latent_channels, latent_spatial, upscale_factor, steps, log_level));
+LIBSDOD_API int libsdod_setup(void** context, const char* models_dir, unsigned int latent_channels, unsigned int latent_spatial, unsigned int upscale_factor, unsigned int steps, unsigned int log_level) {
+    return static_cast<int>(libsdod::setup_impl(context, models_dir, latent_channels, latent_spatial, upscale_factor, steps, log_level));
 }
 
-LIBSD_API int libsd_set_steps(void* context, unsigned int steps) {
-    return static_cast<int>(libsd::set_steps_impl(context, steps));
+LIBSDOD_API int libsdod_set_steps(void* context, unsigned int steps) {
+    return static_cast<int>(libsdod::set_steps_impl(context, steps));
 }
 
-LIBSD_API int libsd_set_log_level(void* context, unsigned int log_level) {
-    return static_cast<int>(libsd::set_log_level_impl(context, log_level));
+LIBSDOD_API int libsdod_set_log_level(void* context, unsigned int log_level) {
+    return static_cast<int>(libsdod::set_log_level_impl(context, log_level));
 }
 
-LIBSD_API int libsd_ref_context(void* context) {
-    return static_cast<int>(libsd::ref_context_impl(context));
+LIBSDOD_API int libsdod_ref_context(void* context) {
+    return static_cast<int>(libsdod::ref_context_impl(context));
 }
 
-LIBSD_API int libsd_release(void* context) {
-    return static_cast<int>(libsd::release_impl(context));
+LIBSDOD_API int libsdod_release(void* context) {
+    return static_cast<int>(libsdod::release_impl(context));
 }
 
-LIBSD_API int libsd_generate_image(void* context, const char* prompt, float guidance_scale, unsigned char** image_out, unsigned int* image_buffer_size) {
-    return static_cast<int>(libsd::generate_image_impl(context, prompt, guidance_scale, image_out, image_buffer_size));
+LIBSDOD_API int libsdod_generate_image(void* context, const char* prompt, float guidance_scale, unsigned char** image_out, unsigned int* image_buffer_size) {
+    return static_cast<int>(libsdod::generate_image_impl(context, prompt, guidance_scale, image_out, image_buffer_size));
 }
 
-LIBSD_API const char* libsd_get_error_description(int errorcode) {
-    return libsd::get_error_description_impl(errorcode);
+LIBSDOD_API const char* libsdod_get_error_description(int errorcode) {
+    return libsdod::get_error_description_impl(errorcode);
 }
 
-LIBSD_API const char* libsd_get_last_error_extra_info(int errorcode, void* context) {
-    return libsd::get_last_error_extra_info_impl(errorcode, context);
+LIBSDOD_API const char* libsdod_get_last_error_extra_info(int errorcode, void* context) {
+    return libsdod::get_last_error_extra_info_impl(errorcode, context);
 }
 
 }

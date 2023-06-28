@@ -28,7 +28,7 @@ PACKAGE_C_INCLUDES += -I $(QNN_SDK_ROOT)/include
 include $(CLEAR_VARS)
 LOCAL_C_INCLUDES               := $(PACKAGE_C_INCLUDES)
 MY_SRC_FILES                   := $(wildcard $(LOCAL_PATH)/../src/*.cpp)
-LOCAL_MODULE                   := libsd
+LOCAL_MODULE                   := libsdod
 LOCAL_SRC_FILES                := $(subst make/,,$(MY_SRC_FILES))
 LOCAL_LDLIBS                   := -lGLESv2 -lEGL
 include $(BUILD_SHARED_LIBRARY)
@@ -39,5 +39,5 @@ MY_SRC_FILES                   := $(LOCAL_PATH)/../test/simple_app.cpp
 LOCAL_MODULE                   := test
 LOCAL_SRC_FILES                := $(subst make/,,$(MY_SRC_FILES))
 LOCAL_LDLIBS                   := -lGLESv2 -lEGL
-LOCAL_SHARED_LIBRARIES         := libsd
+LOCAL_SHARED_LIBRARIES         := libsdod
 include $(BUILD_EXECUTABLE)

@@ -18,7 +18,7 @@
 #include <HTP/QnnHtpPerfInfrastructure.h>
 
 
-using namespace libsd;
+using namespace libsdod;
 
 namespace {
 
@@ -79,7 +79,7 @@ template <class T>
 inline T resolve_symbol(void* libHandle, const char* symName, bool required=true) {
     T ptr = reinterpret_cast<T>(dlsym(libHandle, symName));
     if (ptr == nullptr && required) {
-        throw libsd_exception(ErrorCode::RUNTIME_ERROR, format("Unable to access symbol {}. dlerror(): {}", symName, dlerror()), __func__, __FILE__, STR(__LINE__));
+        throw libsdod_exception(ErrorCode::RUNTIME_ERROR, format("Unable to access symbol {}. dlerror(): {}", symName, dlerror()), __func__, __FILE__, STR(__LINE__));
     }
     return ptr;
 }
@@ -96,7 +96,7 @@ void _generic_qnn_api_call(T&& f, const char* name, const char* func, const char
     debug("Calling QNN function: {}", name);
     auto status = f(std::forward<Args>(args)...);
     if (status != QNN_SUCCESS) {
-        throw libsd_exception(ErrorCode::RUNTIME_ERROR, format("QNN function \"{}\" returned error: {}", name, status), func, file, line);
+        throw libsdod_exception(ErrorCode::RUNTIME_ERROR, format("QNN function \"{}\" returned error: {}", name, status), func, file, line);
     }
 }
 
@@ -140,7 +140,7 @@ std::string _ttype_to_str(Qnn_TensorType_t ttype) {
     case QNN_TENSOR_TYPE_STATIC: return "w";
     case QNN_TENSOR_TYPE_NULL: return "?";
     default:
-        throw libsd_exception(ErrorCode::INTERNAL_ERROR, format("Unexpected tensor type: {}", hex(ttype)), __func__, __FILE__, STR(__LINE__));
+        throw libsdod_exception(ErrorCode::INTERNAL_ERROR, format("Unexpected tensor type: {}", hex(ttype)), __func__, __FILE__, STR(__LINE__));
     }
 }
 
@@ -158,7 +158,7 @@ std::shared_ptr<QnnApi> QnnApi::get(QnnBackendType backend) {
     try {
         raw_ptr = new QnnApi(backend);
     } catch (std::bad_alloc const&) {
-        throw libsd_exception(ErrorCode::FAILED_ALLOCATION, "Could not allocate QnnBackendLibrary", __func__, __FILE__, STR(__LINE__));
+        throw libsdod_exception(ErrorCode::FAILED_ALLOCATION, "Could not allocate QnnBackendLibrary", __func__, __FILE__, STR(__LINE__));
     }
 
     auto ret = std::shared_ptr<QnnApi>(raw_ptr);
@@ -169,13 +169,13 @@ std::shared_ptr<QnnApi> QnnApi::get(QnnBackendType backend) {
 
 QnnApi::QnnApi(QnnBackendType backend) : backend(backend) {
     if (static_cast<int>(backend) < 0 || static_cast<int>(backend) >= _num_backend_libs)
-        throw libsd_exception(ErrorCode::INTERNAL_ERROR, "Backend argument out of bounds", __func__, __FILE__, STR(__LINE__));
+        throw libsdod_exception(ErrorCode::INTERNAL_ERROR, "Backend argument out of bounds", __func__, __FILE__, STR(__LINE__));
 
     // core interface
     const char* _backend_lib_name = _backend_to_lib[static_cast<int>(backend)];
     dl = std::shared_ptr<void>(dlopen(_backend_lib_name, RTLD_NOW | RTLD_LOCAL), _free_dl);
     if (!dl)
-        throw libsd_exception(ErrorCode::RUNTIME_ERROR, "Could not load backend library: " + std::string(_backend_lib_name), __func__, __FILE__, STR(__LINE__));
+        throw libsdod_exception(ErrorCode::RUNTIME_ERROR, "Could not load backend library: " + std::string(_backend_lib_name), __func__, __FILE__, STR(__LINE__));
 
     {
         auto&& query_fn = resolve_symbol<QnnInterfaceGetProvidersFn_t>(dl.get(), "QnnInterface_getProviders");
@@ -185,7 +185,7 @@ QnnApi::QnnApi(QnnBackendType backend) : backend(backend) {
 
         auto status = query_fn((const QnnInterface_t***)&providers, &num_providers);
         if (status != QNN_SUCCESS || providers == nullptr || num_providers == 0)
-            throw libsd_exception(ErrorCode::RUNTIME_ERROR, format("Could not query available interface providers: {}, {}, {}", status, providers, num_providers), __func__, __FILE__, STR(__LINE__));
+            throw libsdod_exception(ErrorCode::RUNTIME_ERROR, format("Could not query available interface providers: {}, {}, {}", status, providers, num_providers), __func__, __FILE__, STR(__LINE__));
 
         bool found = false;
         for (unsigned int i = 0; i < num_providers; i++) {
@@ -197,7 +197,7 @@ QnnApi::QnnApi(QnnBackendType backend) : backend(backend) {
             }
         }
         if (!found) {
-            throw libsd_exception(ErrorCode::RUNTIME_ERROR, "Could not find a suitable interface provider", __func__, __FILE__, STR(__LINE__));
+            throw libsdod_exception(ErrorCode::RUNTIME_ERROR, "Could not find a suitable interface provider", __func__, __FILE__, STR(__LINE__));
         }
 
         Qnn_LogHandle_t _log_hnd = nullptr;
@@ -306,19 +306,19 @@ qnn_hnd<Qnn_ContextHandle_t> QnnApi::create_context(std::vector<unsigned char> c
 
 
 void QnnApi::register_op_package(std::string const& package_path, std::string const& package_interface_provider) const {
-    throw libsd_exception(ErrorCode::INTERNAL_ERROR, "Not implemented", __func__, __FILE__, STR(__LINE__));
+    throw libsdod_exception(ErrorCode::INTERNAL_ERROR, "Not implemented", __func__, __FILE__, STR(__LINE__));
 }
 
 
 QnnSystemContext_BinaryInfo_t const& QnnApi::get_binary_info(std::vector<unsigned char>& buffer) const {
     if (!system_hnd)
-        throw libsd_exception(ErrorCode::INTERNAL_ERROR, "Attempted to get binary info of a serialized context but system context has not been created - see previous warnings", __func__, __FILE__, STR(__LINE__));
+        throw libsdod_exception(ErrorCode::INTERNAL_ERROR, "Attempted to get binary info of a serialized context but system context has not been created - see previous warnings", __func__, __FILE__, STR(__LINE__));
 
     const QnnSystemContext_BinaryInfo_t* binary_info = nullptr;
     Qnn_ContextBinarySize_t binary_info_size = 0;
     _generic_qnn_api_call(system_interface.systemContextGetBinaryInfo, "systemContextGetBinaryInfo", __func__, __FILE__, STR(__LINE__), system_hnd.get(), buffer.data(), buffer.size(), &binary_info, &binary_info_size);
     if (!binary_info)
-        throw libsd_exception(ErrorCode::INVALID_ARGUMENT, "Returned binary info is a nullptr!", __func__, __FILE__, STR(__LINE__));
+        throw libsdod_exception(ErrorCode::INVALID_ARGUMENT, "Returned binary info is a nullptr!", __func__, __FILE__, STR(__LINE__));
 
     return *binary_info;
 }
@@ -338,7 +338,7 @@ void QnnApi::set_graph_config(Qnn_GraphHandle_t graph, const QnnGraph_Config_t**
 
 std::pair<std::shared_ptr<void>,int> QnnApi::allocate_ion(uint32_t size) {
     if (!cdsp_dl)
-        throw libsd_exception(ErrorCode::INTERNAL_ERROR, "Tried to allocate RPC memory without ION support", __func__, __FILE__, STR(__LINE__));
+        throw libsdod_exception(ErrorCode::INTERNAL_ERROR, "Tried to allocate RPC memory without ION support", __func__, __FILE__, STR(__LINE__));
 
     auto&& ptr = std::shared_ptr<void>(rpcmem_alloc(RPCMEM_HEAP_ID_SYSTEM, RPCMEM_DEFAULT_FLAGS, size), [this](void* ptr){
         debug("Freeing RPC memory: {}", ptr);
@@ -346,7 +346,7 @@ std::pair<std::shared_ptr<void>,int> QnnApi::allocate_ion(uint32_t size) {
     });
     debug("RPC memory allocated: {}, {}", ptr.get(), size);
     if (!ptr)
-        throw libsd_exception(ErrorCode::FAILED_ALLOCATION, "Failed to allocate RPC memory!", __func__, __FILE__, STR(__LINE__));
+        throw libsdod_exception(ErrorCode::FAILED_ALLOCATION, "Failed to allocate RPC memory!", __func__, __FILE__, STR(__LINE__));
 
     int fd = rpcmem_to_fd(ptr.get());
     return std::make_pair(std::move(ptr), fd);
@@ -396,7 +396,7 @@ uint8_t QnnTensor::get_element_size(Qnn_Tensor_t const& t) {
     case 0x32: return 4;
     case 0x64: return 8;
     default:
-        throw libsd_exception(ErrorCode::INTERNAL_ERROR, format("Unexpected tensor data type! {}, lower 8-bit: {}", hex(t.v1.dataType), hex(t.v1.dataType & 0xFF)), __func__, __FILE__, STR(__LINE__));
+        throw libsdod_exception(ErrorCode::INTERNAL_ERROR, format("Unexpected tensor data type! {}, lower 8-bit: {}", hex(t.v1.dataType), hex(t.v1.dataType & 0xFF)), __func__, __FILE__, STR(__LINE__));
     }
 }
 
@@ -413,7 +413,7 @@ bool QnnTensor::is_floating_point(Qnn_Tensor_t const& t) {
 
 void QnnTensor::activate() const {
     if (!batch_size)
-        throw libsd_exception(ErrorCode::INTERNAL_ERROR, "Cannot activate QnnTensor with batch_size==0!", __func__, __FILE__, STR(__LINE__));
+        throw libsdod_exception(ErrorCode::INTERNAL_ERROR, "Cannot activate QnnTensor with batch_size==0!", __func__, __FILE__, STR(__LINE__));
 
     if (slot.current_tensor == this)
         return;
@@ -488,31 +488,31 @@ QnnTensor::QnnTensor(QnnTensor const& other, graph_slot& slot) : is_ion(other.is
 
 
 void QnnTensor::set_data(std::vector<float> const& buffer) {
-    throw libsd_exception(ErrorCode::INTERNAL_ERROR, "Not implemented", __func__, __FILE__, STR(__LINE__));
+    throw libsdod_exception(ErrorCode::INTERNAL_ERROR, "Not implemented", __func__, __FILE__, STR(__LINE__));
 }
 
 
 void QnnTensor::set_data(std::vector<uint32_t> const& buffer) {
-    throw libsd_exception(ErrorCode::INTERNAL_ERROR, "Not implemented", __func__, __FILE__, STR(__LINE__));
+    throw libsdod_exception(ErrorCode::INTERNAL_ERROR, "Not implemented", __func__, __FILE__, STR(__LINE__));
 }
 
 
 void QnnTensor::get_data(std::vector<float>& buffer) {
-    throw libsd_exception(ErrorCode::INTERNAL_ERROR, "Not implemented", __func__, __FILE__, STR(__LINE__));
+    throw libsdod_exception(ErrorCode::INTERNAL_ERROR, "Not implemented", __func__, __FILE__, STR(__LINE__));
 }
 
 
 void QnnTensor::get_data(std::vector<uint32_t>& buffer) {
-    throw libsd_exception(ErrorCode::INTERNAL_ERROR, "Not implemented", __func__, __FILE__, STR(__LINE__));
+    throw libsdod_exception(ErrorCode::INTERNAL_ERROR, "Not implemented", __func__, __FILE__, STR(__LINE__));
 }
 
 
 QnnTensor QnnGraph::allocate_input(unsigned int idx, unsigned batch, bool activate) {
     if (idx >= inputs.size())
-        throw libsd_exception(ErrorCode::INTERNAL_ERROR, format("Input index too large: {}", idx), __func__, __FILE__, STR(__LINE__));
+        throw libsdod_exception(ErrorCode::INTERNAL_ERROR, format("Input index too large: {}", idx), __func__, __FILE__, STR(__LINE__));
     auto&& _ctx = ctx.lock();
     if (!_ctx)
-        throw libsd_exception(ErrorCode::INTERNAL_ERROR, "Trying to allocate memory while context has already been deleted!", __func__, __FILE__, STR(__LINE__));
+        throw libsdod_exception(ErrorCode::INTERNAL_ERROR, "Trying to allocate memory while context has already been deleted!", __func__, __FILE__, STR(__LINE__));
     QnnTensor ret{ *api, _ctx.get(), input_slots[idx], batch };
     if (activate)
         ret.activate();
@@ -522,7 +522,7 @@ QnnTensor QnnGraph::allocate_input(unsigned int idx, unsigned batch, bool activa
 
 QnnTensor QnnGraph::attach_input(unsigned int idx, QnnTensor const& t, bool activate) {
     if (idx >= inputs.size())
-        throw libsd_exception(ErrorCode::INTERNAL_ERROR, format("Input index too large: {}", idx), __func__, __FILE__, STR(__LINE__));
+        throw libsdod_exception(ErrorCode::INTERNAL_ERROR, format("Input index too large: {}", idx), __func__, __FILE__, STR(__LINE__));
     QnnTensor ret{ t, input_slots[idx] };
     if (activate)
         ret.activate();
@@ -532,10 +532,10 @@ QnnTensor QnnGraph::attach_input(unsigned int idx, QnnTensor const& t, bool acti
 
 QnnTensor QnnGraph::allocate_output(unsigned int idx, unsigned batch, bool activate) {
     if (idx >= outputs.size())
-        throw libsd_exception(ErrorCode::INTERNAL_ERROR, format("Output index too large: {}", idx), __func__, __FILE__, STR(__LINE__));
+        throw libsdod_exception(ErrorCode::INTERNAL_ERROR, format("Output index too large: {}", idx), __func__, __FILE__, STR(__LINE__));
     auto&& _ctx = ctx.lock();
     if (!_ctx)
-        throw libsd_exception(ErrorCode::INTERNAL_ERROR, "Trying to allocate memory while context has already been deleted!", __func__, __FILE__, STR(__LINE__));
+        throw libsdod_exception(ErrorCode::INTERNAL_ERROR, "Trying to allocate memory while context has already been deleted!", __func__, __FILE__, STR(__LINE__));
     QnnTensor ret{ *api, _ctx.get(), output_slots[idx], batch };
     if (activate)
         ret.activate();
@@ -545,7 +545,7 @@ QnnTensor QnnGraph::allocate_output(unsigned int idx, unsigned batch, bool activ
 
 QnnTensor QnnGraph::attach_output(unsigned int idx, QnnTensor const& t, bool activate) {
     if (idx >= outputs.size())
-        throw libsd_exception(ErrorCode::INTERNAL_ERROR, format("Outputs index too large: {}", idx), __func__, __FILE__, STR(__LINE__));
+        throw libsdod_exception(ErrorCode::INTERNAL_ERROR, format("Outputs index too large: {}", idx), __func__, __FILE__, STR(__LINE__));
     QnnTensor ret{ t, output_slots[idx] };
     if (activate)
         ret.activate();
@@ -579,7 +579,7 @@ void QnnGraph::verify() {
             for (auto&& i : batch_sizes)
                 batch_info += format("\n    {}: {}", i.first, i.second);
         }
-        throw libsd_exception(ErrorCode::RUNTIME_ERROR,
+        throw libsdod_exception(ErrorCode::RUNTIME_ERROR,
             format("Graph verification failed! At least one input or output tensor has not been assigned memory location and/or operates on different batch size!\n    Missing allocations: {}\n    Conflicting batch size: {}\n", missing, std::move(batch_info)),
             __func__, __FILE__, STR(__LINE__));
     }
@@ -790,7 +790,7 @@ void QnnBackend::end_burst() {
 graph_refs QnnBackend::load_context(std::string const& context_blob) {
     std::vector<unsigned char> buffer;
     if (!read_file_content(context_blob, buffer))
-        throw libsd_exception(ErrorCode::INVALID_ARGUMENT, format("Could not read content of the context blob: {}", context_blob), __func__, __FILE__, STR(__LINE__));
+        throw libsdod_exception(ErrorCode::INVALID_ARGUMENT, format("Could not read content of the context blob: {}", context_blob), __func__, __FILE__, STR(__LINE__));
 
     debug("Read {} bytes from file: {}", buffer.size(), context_blob);
 
@@ -812,7 +812,7 @@ graph_refs QnnBackend::load_context(std::string const& context_blob) {
         graphs_info = bin_info.contextBinaryInfoV2.graphs;
         num_graphs = bin_info.contextBinaryInfoV1.numGraphs;
     } else
-        throw libsd_exception(ErrorCode::INVALID_ARGUMENT, format("Unexpected binary info version: {}", bin_info.version), __func__, __FILE__, STR(__LINE__));
+        throw libsdod_exception(ErrorCode::INVALID_ARGUMENT, format("Unexpected binary info version: {}", bin_info.version), __func__, __FILE__, STR(__LINE__));
 
     debug("{} graphs reported", num_graphs);
     for (uint32_t i=0; i<num_graphs; ++i) {
@@ -822,7 +822,7 @@ graph_refs QnnBackend::load_context(std::string const& context_blob) {
             graphs.emplace_back(QnnGraph(context_hnd, api, graph_info.graphInfoV1.graphName, graph_info.graphInfoV1.graphInputs, graph_info.graphInfoV1.numGraphInputs, graph_info.graphInfoV1.graphOutputs, graph_info.graphInfoV1.numGraphOutputs, graph_hnd));
             ret.push_back(graphs.back());
         } else
-            throw libsd_exception(ErrorCode::INVALID_ARGUMENT, format("Unexpected graph info version: {}", graph_info.version), __func__, __FILE__, STR(__LINE__));
+            throw libsdod_exception(ErrorCode::INVALID_ARGUMENT, format("Unexpected graph info version: {}", graph_info.version), __func__, __FILE__, STR(__LINE__));
     }
 
     ctx.emplace_back(QnnContext(std::move(context_hnd), std::move(graphs)));
@@ -831,10 +831,10 @@ graph_refs QnnBackend::load_context(std::string const& context_blob) {
 
 
 graph_refs QnnBackend::load_model(std::string const& model_so) {
-    throw libsd_exception(ErrorCode::INTERNAL_ERROR, "Not implemented", __func__, __FILE__, STR(__LINE__));
+    throw libsdod_exception(ErrorCode::INTERNAL_ERROR, "Not implemented", __func__, __FILE__, STR(__LINE__));
 }
 
 
 // tensor_refs QnnBackend::run(graph_ref graph, tensor_refs& inputs) {
-//     throw libsd_exception(ErrorCode::INTERNAL_ERROR, "Not implemented", __func__, __FILE__, STR(__LINE__));
+//     throw libsdod_exception(ErrorCode::INTERNAL_ERROR, "Not implemented", __func__, __FILE__, STR(__LINE__));
 // }

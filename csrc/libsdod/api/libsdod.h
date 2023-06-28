@@ -1,6 +1,6 @@
 
-#ifndef LIBSD_API
-#define LIBSD_API
+#ifndef LIBSDOD_API
+#define LIBSDOD_API
 #endif
 
 #ifdef __cplusplus
@@ -8,22 +8,22 @@ extern "C" {
 #endif
 
 
-enum libsd_status_code {
-    LIBSD_NO_ERROR,
-    LIBSD_INVALID_CONTEXT,
-    LIBSD_INVALID_ARGUMENT,
-    LIBSD_FAILED_ALLOCATION,
-    LIBSD_RUNTIME_ERROR,
-    LIBSD_INTERNAL_ERROR,
+enum libsdod_status_code {
+    LIBSDOD_NO_ERROR,
+    LIBSDOD_INVALID_CONTEXT,
+    LIBSDOD_INVALID_ARGUMENT,
+    LIBSDOD_FAILED_ALLOCATION,
+    LIBSDOD_RUNTIME_ERROR,
+    LIBSDOD_INTERNAL_ERROR,
 };
 
 
-enum libsd_log_level {
-   LIBSD_LOG_NOTHING,
-   LIBSD_LOG_ERROR,
-   LIBSD_LOG_INFO,
-   LIBSD_LOG_DEBUG,
-   LIBSD_LOG_ABUSIVE
+enum libsdod_log_level {
+   LIBSDOD_LOG_NOTHING,
+   LIBSDOD_LOG_ERROR,
+   LIBSDOD_LOG_INFO,
+   LIBSDOD_LOG_DEBUG,
+   LIBSDOD_LOG_ABUSIVE
 };
 
 
@@ -34,8 +34,8 @@ enum libsd_log_level {
    latent_channels - latent representation channels, SD1.5 uses 4
    latent_spatial - latent representation spatial dimensions, SD1.5 uses 64
    upscale_factor - upscaling factor for the decoder, SD1.5 uses 8
-   steps - number of denoising steps to perform when generating an image, can be later overwritten with libsd_set_steps
-   log_level - logging level, can be later overwritten with libsd_set_log_level
+   steps - number of denoising steps to perform when generating an image, can be later overwritten with libsdod_set_steps
+   log_level - logging level, can be later overwritten with libsdod_set_log_level
 
    Returns 0 if successful, otherwise an error code is returned.
    If successful, *context will be pointer to a prepared context that should be passed to other functions and cleaned when no longer needed, see release.
@@ -43,7 +43,7 @@ enum libsd_log_level {
    by a call to ``release``, it should also be used when querying for error details; it should not be, however, used to generate images.
    If a method fails before a context object is created, *context will be nullptr.
 */
-LIBSD_API int libsd_setup(void** context, const char* models_dir, unsigned int latent_channels, unsigned int latent_spatial, unsigned int upscale_factor, unsigned int steps, unsigned int log_level);
+LIBSDOD_API int libsdod_setup(void** context, const char* models_dir, unsigned int latent_channels, unsigned int latent_spatial, unsigned int upscale_factor, unsigned int steps, unsigned int log_level);
 
 
 /* Changes the number of denoising steps performed when generating images using the provided context.
@@ -53,7 +53,7 @@ LIBSD_API int libsd_setup(void** context, const char* models_dir, unsigned int l
    
    Returns 0 if successful, otherwise an error code is returned.
 */
-LIBSD_API int libsd_set_steps(void* context, unsigned int steps);
+LIBSDOD_API int libsdod_set_steps(void* context, unsigned int steps);
 
 
 /* Changes the log level for the provided context.
@@ -63,7 +63,7 @@ LIBSD_API int libsd_set_steps(void* context, unsigned int steps);
    
    Returns 0 if successful, otherwise an error code is returned.
 */
-LIBSD_API int libsd_set_log_level(void* context, unsigned int log_level);
+LIBSDOD_API int libsdod_set_log_level(void* context, unsigned int log_level);
 
 
 /* Increase reference counter for a given context.
@@ -71,13 +71,13 @@ LIBSD_API int libsd_set_log_level(void* context, unsigned int log_level);
    For each additional call to ref_context, an additional call to release has to be made before
    a context will be actually cleaned.
 */
-LIBSD_API int libsd_ref_context(void* context);
+LIBSDOD_API int libsdod_ref_context(void* context);
 
 /* Release a previously prepared context, obtained by a call to setup.
 
    Returns 0 if successful, otherwise an error code is returned.
 */
-LIBSD_API int libsd_release(void* context);
+LIBSDOD_API int libsdod_release(void* context);
 
 
 /* Run a diffusion process.
@@ -113,14 +113,14 @@ LIBSD_API int libsd_release(void* context);
 
    Returns 0 if successful, otherwise an error code is returned.
 */
-LIBSD_API int libsd_generate_image(void* context, const char* prompt, float guidance_scale, unsigned char** image_out, unsigned int* image_buffer_size);
+LIBSDOD_API int libsdod_generate_image(void* context, const char* prompt, float guidance_scale, unsigned char** image_out, unsigned int* image_buffer_size);
 
 
 /* Return a human-readable null-terminated string describing a returned error code.
 
    The method can return nullptr if ``errorcode`` is not a valid error code.
 */
-LIBSD_API const char* libsd_get_error_description(int errorcode);
+LIBSDOD_API const char* libsdod_get_error_description(int errorcode);
 
 
 /* Return extra information about the last error with ``errorcode`` that occurred within a given ``context``.
@@ -134,7 +134,7 @@ LIBSD_API const char* libsd_get_error_description(int errorcode);
    if ``errorcode`` has not happened for ``context`` or if no extra information has been provided by the implementation when an error was recorded.
    Otherwise a null-terminated string is returned.
 */
-LIBSD_API const char* libsd_get_last_error_extra_info(int errorcode, void* context);
+LIBSDOD_API const char* libsdod_get_last_error_extra_info(int errorcode, void* context);
 
 #ifdef __cplusplus
 }

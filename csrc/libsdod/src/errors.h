@@ -1,5 +1,5 @@
-#ifndef LIBSD_ERRORS_H
-#define LIBSD_ERRORS_H
+#ifndef LIBSDOD_ERRORS_H
+#define LIBSDOD_ERRORS_H
 
 #include <array>
 #include <optional>
@@ -7,7 +7,7 @@
 #include <memory>
 
 
-namespace libsd {
+namespace libsdod {
 
 enum class ErrorCode : int {
     NO_ERROR,
@@ -18,9 +18,9 @@ enum class ErrorCode : int {
     INTERNAL_ERROR,
 };
 
-constexpr unsigned int LIBSD_NUM_ERRORS = 6;
+constexpr unsigned int LIBSDOD_NUM_ERRORS = 6;
 
-using ErrorTable = std::shared_ptr<std::array<std::optional<std::string>, LIBSD_NUM_ERRORS>>;
+using ErrorTable = std::shared_ptr<std::array<std::optional<std::string>, LIBSDOD_NUM_ERRORS>>;
 
 ErrorTable allocate_error_table();
 
@@ -35,9 +35,9 @@ const char* get_error_str(ErrorCode code);
 const char* get_last_error_info(ErrorTable tab, ErrorCode error);
 
 
-class libsd_exception : public std::exception {
+class libsdod_exception : public std::exception {
 public:
-    libsd_exception(ErrorCode code, std::string msg, const char* func, const char* file, const char* line);
+    libsdod_exception(ErrorCode code, std::string msg, const char* func, const char* file, const char* line);
 
     virtual const char* what() const noexcept { return _what.c_str(); }
 
@@ -59,4 +59,4 @@ private:
 
 }
 
-#endif // LIBSD_ERRORS_H
+#endif // LIBSDOD_ERRORS_H

@@ -4,7 +4,7 @@
 
 #include <cstdlib>
 
-using namespace libsd;
+using namespace libsdod;
 
 
 Buffer<void>::Buffer() {}
@@ -12,7 +12,7 @@ Buffer<void>::Buffer() {}
 Buffer<void>::Buffer(std::size_t len){
     _ptr = malloc(len);
     if (!_ptr)
-        throw libsd_exception(ErrorCode::FAILED_ALLOCATION, "Could not allocate a buffer of size: " + std::to_string(len), __func__, __FILE__, STR(__LINE__));
+        throw libsdod_exception(ErrorCode::FAILED_ALLOCATION, "Could not allocate a buffer of size: " + std::to_string(len), __func__, __FILE__, STR(__LINE__));
     _len = len;
     _own = true;
 }

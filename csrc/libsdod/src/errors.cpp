@@ -3,9 +3,9 @@
 #include <cstring>
 #include <type_traits>
 
-namespace libsd {
+namespace libsdod {
 
-static const char* _error_messages[LIBSD_NUM_ERRORS] = {
+static const char* _error_messages[LIBSDOD_NUM_ERRORS] = {
     "No error",
     "Invalid context",
     "Invalid argument",
@@ -25,7 +25,7 @@ ErrorTable allocate_error_table() {
 static ErrorTable _contextless_error_table = allocate_error_table();
 
 bool is_valid_error_code(int errorcode) {
-    return errorcode >= 0 && errorcode < LIBSD_NUM_ERRORS;
+    return errorcode >= 0 && errorcode < LIBSDOD_NUM_ERRORS;
 }
 
 void record_error(ErrorTable tab, ErrorCode error) {
@@ -68,9 +68,9 @@ const char* get_last_error_info(ErrorTable tab, ErrorCode error) {
 
 }
 
-using namespace libsd;
+using namespace libsdod;
 
-libsd_exception::libsd_exception(ErrorCode code, std::string msg, const char* func, const char* file, const char* line)
+libsdod_exception::libsdod_exception(ErrorCode code, std::string msg, const char* func, const char* file, const char* line)
     : std::exception(), _code(code), _reason(std::move(msg)), _func(func), _file(file), _line(line)
 {
     auto cfile = _file.c_str();

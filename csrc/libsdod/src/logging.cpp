@@ -14,7 +14,7 @@
 #define ANDROID_LOG_ERROR 0
 #endif
 
-namespace libsd {
+namespace libsdod {
 
 namespace {
 
@@ -43,7 +43,7 @@ void dispatch_message(std::ostream& out, uint64_t timestamp, const char* level_t
 } // end local
 
 bool is_valid_log_level(int log_level) {
-    return log_level >= 0 && log_level < LIBSD_NUM_LOG_LEVELS;
+    return log_level >= 0 && log_level < LIBSDOD_NUM_LOG_LEVELS;
 }
 
 bool is_enabled(LogLevel level) {
@@ -64,7 +64,7 @@ void message(uint64_t timestamp, LogLevel level, std::string const& str) {
 
 } // end libsd functions
 
-using namespace libsd;
+using namespace libsdod;
 
 Logger::Logger() : current_level(LogLevel::NOTHING) {
     created = std::time(nullptr);
@@ -97,7 +97,7 @@ void Logger::message(uint64_t timestamp, LogLevel level, std::string const& str)
         dispatch_message(std::cerr, timestamp > created ? timestamp - created : 0, "[ERROR]", ANDROID_LOG_ERROR, str.c_str());
         break;
     case LogLevel::NOTHING:
-        throw libsd_exception(ErrorCode::INTERNAL_ERROR, "Unreachable", __func__, __FILE__, STR(__LINE__));
+        throw libsdod_exception(ErrorCode::INTERNAL_ERROR, "Unreachable", __func__, __FILE__, STR(__LINE__));
     }
 }
 

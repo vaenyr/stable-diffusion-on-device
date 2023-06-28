@@ -6,7 +6,7 @@
 #include <vector>
 
 
-namespace libsd {
+namespace libsdod {
 
 namespace details {
 

@@ -1,5 +1,5 @@
-#ifndef LIBSD_QNN_CONTEXT_H
-#define LIBSD_QNN_CONTEXT_H
+#ifndef LIBSDOD_QNN_CONTEXT_H
+#define LIBSDOD_QNN_CONTEXT_H
 
 #include <list>
 #include <span>
@@ -13,7 +13,7 @@
 #include <HTP/QnnHtpDevice.h>
 
 
-namespace libsd {
+namespace libsdod {
 
 class QnnApi;
 class QnnTensor;
@@ -221,4 +221,4 @@ private:
 
 }
 
-#endif // LIBSD_QNN_CONTEXT_H
+#endif // LIBSDOD_QNN_CONTEXT_H

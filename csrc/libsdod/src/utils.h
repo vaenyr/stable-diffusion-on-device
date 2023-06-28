@@ -1,5 +1,5 @@
-#ifndef LIBSD_UTILS_H
-#define LIBSD_UTILS_H
+#ifndef LIBSDOD_UTILS_H
+#define LIBSDOD_UTILS_H
 
 #define _STR(x) #x
 #define STR(x) _STR(x)
@@ -15,7 +15,7 @@
 #include <span>
 
 
-namespace libsd {
+namespace libsdod {
 
 template <class T>
 inline std::string hex(T&& t) {
@@ -189,4 +189,4 @@ auto range(T&& min, T&& max) {
 
 }
 
-#endif // LIBSD_UTILS_H
+#endif // LIBSDOD_UTILS_H

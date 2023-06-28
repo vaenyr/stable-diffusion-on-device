@@ -1,5 +1,5 @@
-#ifndef LIBSD_LOGGING_H
-#define LIBSD_LOGGING_H
+#ifndef LIBSDOD_LOGGING_H
+#define LIBSDOD_LOGGING_H
 
 #include <string>
 #include <ctime>
@@ -7,7 +7,7 @@
 #include "utils.h"
 
 
-namespace libsd {
+namespace libsdod {
 
 enum class LogLevel : int {
     NOTHING,
@@ -17,7 +17,7 @@ enum class LogLevel : int {
     ABUSIVE
 };
 
-constexpr unsigned int LIBSD_NUM_LOG_LEVELS = 5;
+constexpr unsigned int LIBSDOD_NUM_LOG_LEVELS = 5;
 
 bool is_valid_log_level(int loglevel);
 bool is_enabled(LogLevel level);
@@ -89,4 +89,4 @@ private:
 
 }
 
-#endif // LIBSD_LOGGING_H
+#endif // LIBSDOD_LOGGING_H

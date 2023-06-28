@@ -1,5 +1,5 @@
-#ifndef LIBSD_CONTEXT_H
-#define LIBSD_CONTEXT_H
+#ifndef LIBSDOD_CONTEXT_H
+#define LIBSDOD_CONTEXT_H
 
 #include <string>
 #include <optional>
@@ -10,7 +10,7 @@
 #include "logging.h"
 
 
-namespace libsd {
+namespace libsdod {
 
 
 struct StableDiffusionModel {
@@ -72,4 +72,4 @@ private:
 
 }
 
-#endif // LIBSD_CONTEXT_H
+#endif // LIBSDOD_CONTEXT_H
