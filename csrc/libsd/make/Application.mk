@@ -15,4 +15,4 @@ APP_CPPFLAGS += -std=c++20 -O3 -Wall -Werror -fexceptions -fvisibility=hidden -D
 else
 APP_CPPFLAGS += -std=c++20 -O0 -g -Wall -Werror -fexceptions
 endif
-APP_LDFLAGS  += -nodefaultlibs -lc -lm -ldl -lgcc -llog
+APP_LDFLAGS  += -lc -lm -ldl -llog

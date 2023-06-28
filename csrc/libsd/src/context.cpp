@@ -2,6 +2,8 @@
 #include "error.h"
 #include "utils.h"
 
+#include <chrono>
+
 using namespace libsd;
 
 
@@ -36,6 +38,7 @@ void Context::load_models() {
         return;
 
     auto&& get_model = [this](const char* name) -> graph_ref {
+        info("Attempting to load a model: {}", name);
         auto&& path = models_dir + "/" + name;
         auto&& graphs = _qnn->load_context(path);
         if (graphs.empty())
@@ -46,11 +49,11 @@ void Context::load_models() {
     };
 
     _model.emplace(StableDiffusionModel{
-        .cond_model = get_model("cond_model.bin"),
-        .decoder = get_model("decoder.bin"),
-        .unet_inputs = get_model("sd_unet_inputs.bin"),
-        .unet_middle = get_model("sd_unet_middle.bin"),
         .unet_outputs = get_model("sd_unet_outputs.bin"),
+        .unet_inputs = get_model("sd_unet_inputs.bin"),
+        .cond_model = get_model("cond_model.bin"),
+        .unet_middle = get_model("sd_unet_middle.bin"),
+        .decoder = get_model("decoder.bin"),
         .unet_head = get_model("sd_unet_head.bin")
     });
 
@@ -64,11 +67,36 @@ void Context::prepare_solver() {
 
 
 void Context::prepare_buffers() {
+    if (!_model)
+        return;
+
+    auto&& prepare_part = [this](QnnGraph& g) {
+        for (unsigned int i : range(g.get_num_inputs()))
+            tensors.emplace_back(g.allocate_input(i));
+        for (unsigned int i : range(g.get_num_outputs()))
+            tensors.emplace_back(g.allocate_output(i));
+    };
+
+    prepare_part(_model->cond_model);
+    prepare_part(_model->decoder);
+    prepare_part(_model->unet_inputs);
+    prepare_part(_model->unet_middle);
+    prepare_part(_model->unet_outputs);
+    prepare_part(_model->unet_head);
+
+    _model->cond_model.verify();
+    _model->decoder.verify();
+    _model->unet_inputs.verify();
+    _model->unet_middle.verify();
+    _model->unet_outputs.verify();
+    _model->unet_head.verify();
+
     info("Input/output buffers created and prepared!");
 }
 
 
 void Context::prepare_schedule(unsigned int steps) {
+    t_schedule.resize(steps); // TODO: do properly
     info("Time schedule prepared for {} steps!", steps);
 }
 
@@ -80,6 +108,8 @@ void Context::generate(std::string const& prompt, float guidance, Buffer<unsigne
         return;
     if (!_model)
         return;
+
+    auto&& start = std::chrono::high_resolution_clock::now();
 
     info("Starting image generation for prompt: \"{}\" and guidance {}", prompt, guidance);
     debug("Current steps: {}", t_schedule.size());
@@ -95,28 +125,41 @@ void Context::generate(std::string const& prompt, float guidance, Buffer<unsigne
     if (guidance != 1.0f)
         y_cond.resize(latent_channels * latent_spatial * latent_spatial);
 
-    // _draw_random_sample(x_curr);
+    auto&& _report_time = [](const char* name,
+        std::chrono::high_resolution_clock::time_point const& t1,
+        std::chrono::high_resolution_clock::time_point const& t2) {
+        auto&& diff = std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1);
+        info("{} took {}ms", name, diff.count());
+    };
 
-    // for (auto&& t : t_schedule) {
-    //     _set_inputs<0, 1>(_model.unet_inputs, x_curr, t);
-    //     _set_inputs<1>(_model.unet_middle, t);
-    //     _set_inputs<1>(_model.unet_middle, t);
-    //     _set_inputs<16>(_model.unet_middle, t);
-    //     _set_inputs<1>(_model.unet_middle, t);
+    _qnn->start_burst();
 
-    //     _run_model(_model.unet_inputs);
-    //     _run_model(_model.unet_middle);
-    //     _run_model(_model.unet_outputs);
-    //     _run_model(_model.unet_head);
+    auto&& tick = std::chrono::high_resolution_clock::now();
+    _model->cond_model.execute();
+    auto&& tock = std::chrono::high_resolution_clock::now();
+    _report_time("Conditioning", tick, tock);
 
-    //     if (guidance != 1.0f) {
-    //         _set_inputs<
-    //     }
-    // }
+    for (auto&& t : t_schedule) {
+        (void)t;
+        tick = std::chrono::high_resolution_clock::now();
+        _model->unet_inputs.execute();
+        _model->unet_middle.execute();
+        _model->unet_outputs.execute();
+        _model->unet_head.execute();
+        tock = std::chrono::high_resolution_clock::now();
+        _report_time("Single iteration", tick, tock);
+    }
 
-    // _run_model(_model.decoder);
+    tick = std::chrono::high_resolution_clock::now();
+    _model->decoder.execute();
+    tock = std::chrono::high_resolution_clock::now();
+    _report_time("Decoding", tick, tock);
 
     info("Image successfully generated!");
+    auto&& end = std::chrono::high_resolution_clock::now();
+    _report_time("Image generation", start, end);
+
+    _qnn->end_burst();
 }
 
 

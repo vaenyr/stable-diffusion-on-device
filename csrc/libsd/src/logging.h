@@ -10,13 +10,14 @@
 namespace libsd {
 
 enum class LogLevel : int {
-    DEBUG,
-    INFO,
+    NOTHING,
     ERROR,
-    NOTHING
+    INFO,
+    DEBUG,
+    ABUSIVE
 };
 
-constexpr unsigned int LIBSD_NUM_LOG_LEVELS = 4;
+constexpr unsigned int LIBSD_NUM_LOG_LEVELS = 5;
 
 bool is_valid_log_level(int loglevel);
 bool is_enabled(LogLevel level);
@@ -43,6 +44,13 @@ void error(std::string const& fmt, T&&... args) {
     if (!is_enabled(LogLevel::ERROR))
         return;
     return message(LogLevel::ERROR, format(fmt, std::forward<T>(args)...));
+}
+
+template <class... T>
+void abusive(std::string const& fmt, T&&... args) {
+    if (!is_enabled(LogLevel::ABUSIVE))
+        return;
+    return message(LogLevel::ABUSIVE, format(fmt, std::forward<T>(args)...));
 }
 
 

@@ -19,10 +19,11 @@ enum libsd_status_code {
 
 
 enum libsd_log_level {
-   LIBSD_LOG_DEBUG,
-   LIBSD_LOG_INFO,
+   LIBSD_LOG_NOTHING,
    LIBSD_LOG_ERROR,
-   LIBSD_LOG_NOTHING
+   LIBSD_LOG_INFO,
+   LIBSD_LOG_DEBUG,
+   LIBSD_LOG_ABUSIVE
 };
 
 

@@ -26,10 +26,7 @@ void dispatch_message(std::ostream& out, uint64_t timestamp, const char* level_t
         --len;
 
     out.write("[", 1);
-    if (timestamp)
-        out << '+' << timestamp;
-    else
-        out << '?';
+    out << '+' << timestamp;
     out.write("]:", 3);
     out.write(level_tag, strlen(level_tag));
     out.write(" ", 1);
@@ -52,7 +49,7 @@ bool is_valid_log_level(int log_level) {
 bool is_enabled(LogLevel level) {
     if (!active_logger)
         return false;
-    return active_logger->get_level() <= level;
+    return active_logger->get_level() >= level;
 }
 
 void message(LogLevel level, std::string const& str) {
@@ -83,10 +80,13 @@ void Logger::set_level(LogLevel level) {
 }
 
 void Logger::message(uint64_t timestamp, LogLevel level, std::string const& str) {
-    if (current_level > level || current_level >= LogLevel::NOTHING)
+    if (current_level < level || current_level <= LogLevel::NOTHING)
         return;
 
     switch (level) {
+    case LogLevel::ABUSIVE:
+        dispatch_message(std::cout, timestamp > created ? timestamp - created : 0, "[ABUSIVE]", ANDROID_LOG_DEBUG, str.c_str());
+        break;
     case LogLevel::DEBUG:
         dispatch_message(std::cout, timestamp > created ? timestamp - created : 0, "[DEBUG]", ANDROID_LOG_DEBUG, str.c_str());
         break;

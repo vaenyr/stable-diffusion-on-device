@@ -6,6 +6,8 @@
 #include <map>
 #include <string>
 #include <vector>
+#include <cassert>
+#include <cstring>
 
 #include <dlfcn.h>
 
@@ -44,13 +46,14 @@ void qnn_log_callback(const char* fmt, QnnLog_Level_t level, uint64_t timestamp,
         sd_level = LogLevel::ERROR;
         break;
     case QNN_LOG_LEVEL_WARN:
-    case QNN_LOG_LEVEL_INFO:
         sd_level = LogLevel::INFO;
         break;
-    case QNN_LOG_LEVEL_DEBUG:
+    case QNN_LOG_LEVEL_INFO:
     case QNN_LOG_LEVEL_VERBOSE:
-    case QNN_LOG_LEVEL_MAX:
         sd_level = LogLevel::DEBUG;
+    case QNN_LOG_LEVEL_DEBUG:
+    case QNN_LOG_LEVEL_MAX:
+        sd_level = LogLevel::ABUSIVE;
         break;
     }
     if (!is_enabled(sd_level))
@@ -96,6 +99,51 @@ void _generic_qnn_api_call(T&& f, const char* name, const char* func, const char
         throw libsd_exception(ErrorCode::RUNTIME_ERROR, format("QNN function \"{}\" returned error: {}", name, status), func, file, line);
     }
 }
+
+std::string _format_to_str(Qnn_TensorDataFormat_t tformat) {
+    if (tformat == 0)
+        return "flat_buffer";
+    return format("unk({})", hex(tformat));
+}
+
+std::string _dtype_to_str(Qnn_DataType_t dtype) {
+    static const char* _names[] = {
+        "int8", "int16", "int32", "int64",
+        "uint8", "uint16", "uint32", "uint64",
+        "unk(0x0208)", "float16", "float32", "unk(0x0264)",
+        "sq8", "sq16", "sq32", "unk(0x0364)",
+        "uq8", "uq16", "uq32", "unk(0x0464)",
+        "bool"
+    };
+
+    uint8_t group = (dtype >> 8);
+    if (group > 5 || dtype > 0x0508)
+        return format("unk({})", hex(dtype));
+
+    uint8_t bits = (dtype & 0xFF);
+    if (bits != 0x08 && bits != 0x16 && bits != 0x32 && bits != 0x64)
+        return format("unk({})", hex(dtype));
+
+    bits = (bits >> 8) + (bits >> 1 & 0x01) + (bits >> 1 & 0x02);
+    assert(bits >= 0 && bits <= 3);
+    assert(group <= 5);
+    assert(group < 5 || bits == 0);
+    return _names[group*4 + bits];
+}
+
+std::string _ttype_to_str(Qnn_TensorType_t ttype) {
+    switch (ttype) {
+    case QNN_TENSOR_TYPE_APP_WRITE: return "w";
+    case QNN_TENSOR_TYPE_APP_READ: return "r";
+    case QNN_TENSOR_TYPE_APP_READWRITE: return "rw";
+    case QNN_TENSOR_TYPE_NATIVE: return "h";
+    case QNN_TENSOR_TYPE_STATIC: return "w";
+    case QNN_TENSOR_TYPE_NULL: return "?";
+    default:
+        throw libsd_exception(ErrorCode::INTERNAL_ERROR, format("Unexpected tensor type: {}", hex(ttype)), __func__, __FILE__, STR(__LINE__));
+    }
+}
+
 
 } // anonymous
 
@@ -222,6 +270,13 @@ QnnApi::~QnnApi() {
 }
 
 
+QnnDevice_Infrastructure_t QnnApi::get_device_infrastructure() const {
+    QnnDevice_Infrastructure_t ret = nullptr;
+    _generic_qnn_api_call(interface.deviceGetInfrastructure, "deviceGetInfrastructure", __func__, __FILE__, STR(__LINE__), &ret);
+    return ret;
+}
+
+
 qnn_hnd<Qnn_BackendHandle_t> QnnApi::create_backend(const QnnBackend_Config_t** cfg) const {
     Qnn_BackendHandle_t ret = nullptr;
     _generic_qnn_api_call(interface.backendCreate, "backendCreate", __func__, __FILE__, STR(__LINE__), log_hnd.get(), cfg, &ret);
@@ -276,11 +331,20 @@ Qnn_GraphHandle_t QnnApi::retrieve_graph(Qnn_ContextHandle_t context, const char
 }
 
 
+void QnnApi::set_graph_config(Qnn_GraphHandle_t graph, const QnnGraph_Config_t** cfg) const {
+    _generic_qnn_api_call(interface.graphSetConfig, "graphSetConfig", __func__, __FILE__, STR(__LINE__), graph, cfg);
+}
+
+
 std::pair<std::shared_ptr<void>,int> QnnApi::allocate_ion(uint32_t size) {
     if (!cdsp_dl)
         throw libsd_exception(ErrorCode::INTERNAL_ERROR, "Tried to allocate RPC memory without ION support", __func__, __FILE__, STR(__LINE__));
 
-    auto&& ptr = std::shared_ptr<void>(rpcmem_alloc(RPCMEM_HEAP_ID_SYSTEM, RPCMEM_DEFAULT_FLAGS, size), rpcmem_free);
+    auto&& ptr = std::shared_ptr<void>(rpcmem_alloc(RPCMEM_HEAP_ID_SYSTEM, RPCMEM_DEFAULT_FLAGS, size), [this](void* ptr){
+        debug("Freeing RPC memory: {}", ptr);
+        rpcmem_free(ptr);
+    });
+    debug("RPC memory allocated: {}, {}", ptr.get(), size);
     if (!ptr)
         throw libsd_exception(ErrorCode::FAILED_ALLOCATION, "Failed to allocate RPC memory!", __func__, __FILE__, STR(__LINE__));
 
@@ -296,35 +360,101 @@ qnn_hnd<Qnn_MemHandle_t> QnnApi::mem_register(Qnn_ContextHandle_t ctx, Qnn_MemDe
 }
 
 
-void QnnTensor::activate() const {
-    if (!batch_size)
-        throw libsd_exception(ErrorCode::INTERNAL_ERROR, "Cannot activate QnnTensor with batch_size==0!", __func__, __FILE__, STR(__LINE__));
+void QnnApi::execute_graph(Qnn_GraphHandle_t graph, std::span<Qnn_Tensor_t> const& inputs, std::span<Qnn_Tensor_t>& outputs) {
+    _generic_qnn_api_call(interface.graphExecute, "graphExecute", __func__, __FILE__, STR(__LINE__), graph, inputs.data(), inputs.size(), outputs.data(), outputs.size(), nullptr, nullptr);
+}
 
-    if (is_ion) {
-        target.v1.memType = QNN_TENSORMEMTYPE_MEMHANDLE;
-        target.v1.memHandle = data_hnd.get();
-    } else {
-        Qnn_ClientBuffer_t wrapper = QNN_CLIENT_BUFFER_INIT;
-        wrapper.data = data.get();
-        wrapper.dataSize = data_size;
 
-        target.v1.memType = QNN_TENSORMEMTYPE_RAW;
-        target.v1.clientBuf = wrapper;
+QnnTensor::QnnTensor(QnnTensor&& other) : is_ion(other.is_ion), batch_size(other.batch_size), data(std::move(other.data)), data_size(other.data_size), data_fd(other.data_fd), data_hnd(std::move(other.data_hnd)), slot(other.slot) {
+    if (slot.current_tensor == &other)
+        slot.current_tensor = this;
+}
+
+
+QnnTensor::~QnnTensor() {
+    if (data.get()) {
+        debug("Deallocating a tensor pointing to the memory location: {}", data.get());
+        deactivate();
     }
 }
 
 
 uint32_t QnnTensor::get_num_elements(Qnn_Tensor_t const& t, unsigned int batch_size) {
-    return 0;
+    if (!t.v1.rank)
+        return 0;
+    uint32_t ret = 1;
+    for (uint32_t i=1; i<t.v1.rank; ++i)
+        ret *= t.v1.dimensions[i];
+    return ret*batch_size;
 }
 
 
 uint8_t QnnTensor::get_element_size(Qnn_Tensor_t const& t) {
-    return 0;
+    switch (t.v1.dataType & 0xFF) {
+    case 0x08: return 1;
+    case 0x16: return 2;
+    case 0x32: return 4;
+    case 0x64: return 8;
+    default:
+        throw libsd_exception(ErrorCode::INTERNAL_ERROR, format("Unexpected tensor data type! {}, lower 8-bit: {}", hex(t.v1.dataType), hex(t.v1.dataType & 0xFF)), __func__, __FILE__, STR(__LINE__));
+    }
 }
 
 
-QnnTensor::QnnTensor(QnnApi& api, Qnn_ContextHandle_t ctx,  Qnn_Tensor_t& desc, unsigned int batch_size) : batch_size(batch_size), target(desc) {
+bool QnnTensor::is_quantized(Qnn_Tensor_t const& t) {
+    return (t.v1.dataType >> 8) == 0x03 || (t.v1.dataType >> 8) == 0x04;
+}
+
+
+bool QnnTensor::is_floating_point(Qnn_Tensor_t const& t) {
+    return (t.v1.dataType >> 8) == 0x03 || (t.v1.dataType >> 8) == 0x04 || (t.v1.dataType >> 8) == 0x02; // quantized or normal fp
+}
+
+
+void QnnTensor::activate() const {
+    if (!batch_size)
+        throw libsd_exception(ErrorCode::INTERNAL_ERROR, "Cannot activate QnnTensor with batch_size==0!", __func__, __FILE__, STR(__LINE__));
+
+    if (slot.current_tensor == this)
+        return;
+
+    if (is_ion) {
+        slot.target.v1.memType = QNN_TENSORMEMTYPE_MEMHANDLE;
+        slot.target.v1.memHandle = data_hnd.get();
+    } else {
+        Qnn_ClientBuffer_t wrapper = QNN_CLIENT_BUFFER_INIT;
+        wrapper.data = data.get();
+        wrapper.dataSize = data_size;
+
+        slot.target.v1.memType = QNN_TENSORMEMTYPE_RAW;
+        slot.target.v1.clientBuf = wrapper;
+    }
+
+    slot.current_tensor = this;
+    debug("Memory location {} is now the source of data for slot: {}", data.get(), slot.target.v1.name);
+}
+
+
+void QnnTensor::deactivate() const {
+    if (!batch_size)
+        return;
+
+    if (slot.current_tensor != this)
+        return;
+
+    Qnn_ClientBuffer_t wrapper = QNN_CLIENT_BUFFER_INIT;
+    wrapper.data = nullptr;
+    wrapper.dataSize = 0;
+
+    slot.target.v1.memType = QNN_TENSORMEMTYPE_RAW;
+    slot.target.v1.clientBuf = wrapper;
+
+    slot.current_tensor = nullptr;
+    debug("Slot {} is now unbounded, previous memory location: {}", slot.target.v1.name, data.get());
+}
+
+
+QnnTensor::QnnTensor(QnnApi& api, Qnn_ContextHandle_t ctx, graph_slot& slot, unsigned int batch_size) : batch_size(batch_size), slot(slot) {
     if (!batch_size)
         return;
 
@@ -333,61 +463,174 @@ QnnTensor::QnnTensor(QnnApi& api, Qnn_ContextHandle_t ctx,  Qnn_Tensor_t& desc, 
         std::tie(data, data_fd) = api.allocate_ion(data_size);
 
         Qnn_MemDescriptor_t desc = QNN_MEM_DESCRIPTOR_INIT;
-        desc.memShape = { target.v1.rank, target.v1.dimensions, nullptr };
-        desc.dataType = desc.dataType;
+        desc.memShape = { slot.target.v1.rank, slot.target.v1.dimensions, nullptr };
+        desc.dataType = slot.target.v1.dataType;
         desc.memType = QNN_MEM_TYPE_ION;
         desc.ionInfo.fd = data_fd;
         data_hnd = api.mem_register(ctx, desc);
         is_ion = true;
+        debug("New ION tensor allocated: {}; target: {}, {}, {}", data.get(), slot.target.v1.name, _dtype_to_str(slot.target.v1.dataType), std::span(slot.target.v1.dimensions, slot.target.v1.rank));
     } else {
-        data = std::shared_ptr<void>(new uint8_t[data_size], std::default_delete<uint8_t[]>());
+        data = std::shared_ptr<void>(new uint8_t[data_size], [](void* ptr) {
+            debug("Freeing memory: {}", ptr);
+        });
+        debug("Memory allocated: {}, {}", data.get(), data_size);
         is_ion = false;
+        debug("New standard tensor allocated: {}; target: {}, {}, {}", data.get(), slot.target.v1.name, _dtype_to_str(slot.target.v1.dataType), std::span(slot.target.v1.dimensions, slot.target.v1.rank));
     }
 }
 
 
-QnnTensor::QnnTensor(QnnTensor const& other, Qnn_Tensor_t& target) : is_ion(other.is_ion), batch_size(other.batch_size), data(other.data), data_size(other.data_size),
-    data_fd(other.data_fd), data_hnd(other.data_hnd), target(target) {
+QnnTensor::QnnTensor(QnnTensor const& other, graph_slot& slot) : is_ion(other.is_ion), batch_size(other.batch_size), data(other.data), data_size(other.data_size),
+    data_fd(other.data_fd), data_hnd(other.data_hnd), slot(slot) {
+    debug("New aliased tensor, data location: {} also targets {}, original target: {}", data.get(), slot.target.v1.name, other.slot.target.v1.name);
 }
 
 
-QnnTensor QnnGraph::allocate_input(unsigned int idx, unsigned batch) {
+void QnnTensor::set_data(std::vector<float> const& buffer) {
+    throw libsd_exception(ErrorCode::INTERNAL_ERROR, "Not implemented", __func__, __FILE__, STR(__LINE__));
+}
+
+
+void QnnTensor::set_data(std::vector<uint32_t> const& buffer) {
+    throw libsd_exception(ErrorCode::INTERNAL_ERROR, "Not implemented", __func__, __FILE__, STR(__LINE__));
+}
+
+
+void QnnTensor::get_data(std::vector<float>& buffer) {
+    throw libsd_exception(ErrorCode::INTERNAL_ERROR, "Not implemented", __func__, __FILE__, STR(__LINE__));
+}
+
+
+void QnnTensor::get_data(std::vector<uint32_t>& buffer) {
+    throw libsd_exception(ErrorCode::INTERNAL_ERROR, "Not implemented", __func__, __FILE__, STR(__LINE__));
+}
+
+
+QnnTensor QnnGraph::allocate_input(unsigned int idx, unsigned batch, bool activate) {
     if (idx >= inputs.size())
         throw libsd_exception(ErrorCode::INTERNAL_ERROR, format("Input index too large: {}", idx), __func__, __FILE__, STR(__LINE__));
     auto&& _ctx = ctx.lock();
     if (!_ctx)
         throw libsd_exception(ErrorCode::INTERNAL_ERROR, "Trying to allocate memory while context has already been deleted!", __func__, __FILE__, STR(__LINE__));
-    return QnnTensor(*api, _ctx.get(), inputs[idx], batch);
+    QnnTensor ret{ *api, _ctx.get(), input_slots[idx], batch };
+    if (activate)
+        ret.activate();
+    return ret;
 }
 
 
-QnnTensor QnnGraph::attach_input(unsigned int idx, QnnTensor const& t) {
+QnnTensor QnnGraph::attach_input(unsigned int idx, QnnTensor const& t, bool activate) {
     if (idx >= inputs.size())
         throw libsd_exception(ErrorCode::INTERNAL_ERROR, format("Input index too large: {}", idx), __func__, __FILE__, STR(__LINE__));
-    return QnnTensor(t, inputs[idx]);
+    QnnTensor ret{ t, input_slots[idx] };
+    if (activate)
+        ret.activate();
+    return ret;
 }
 
 
-QnnTensor QnnGraph::allocate_output(unsigned int idx, unsigned batch) {
+QnnTensor QnnGraph::allocate_output(unsigned int idx, unsigned batch, bool activate) {
     if (idx >= outputs.size())
         throw libsd_exception(ErrorCode::INTERNAL_ERROR, format("Output index too large: {}", idx), __func__, __FILE__, STR(__LINE__));
     auto&& _ctx = ctx.lock();
     if (!_ctx)
         throw libsd_exception(ErrorCode::INTERNAL_ERROR, "Trying to allocate memory while context has already been deleted!", __func__, __FILE__, STR(__LINE__));
-    return QnnTensor(*api, _ctx.get(), outputs[idx], batch);
+    QnnTensor ret{ *api, _ctx.get(), output_slots[idx], batch };
+    if (activate)
+        ret.activate();
+    return ret;
 }
 
 
-QnnTensor QnnGraph::attach_output(unsigned int idx, QnnTensor const& t) {
+QnnTensor QnnGraph::attach_output(unsigned int idx, QnnTensor const& t, bool activate) {
     if (idx >= outputs.size())
         throw libsd_exception(ErrorCode::INTERNAL_ERROR, format("Outputs index too large: {}", idx), __func__, __FILE__, STR(__LINE__));
-    return QnnTensor(t, outputs[idx]);
+    QnnTensor ret{ t, output_slots[idx] };
+    if (activate)
+        ret.activate();
+    return ret;
+}
+
+
+void QnnGraph::verify() {
+    std::list<std::string> missing;
+    std::map<unsigned int, std::list<const char*>> batch_sizes;
+
+    for (auto&& s : input_slots) {
+        if (!s.current_tensor)
+            missing.push_back(s.target.v1.name);
+        else
+            batch_sizes[s.current_tensor->batch_size].push_back(s.target.v1.name);
+    }
+    for (auto&& s : output_slots) {
+        if (!s.current_tensor)
+            missing.push_back(s.target.v1.name);
+        else
+            batch_sizes[s.current_tensor->batch_size].push_back(s.target.v1.name);
+    }
+
+    if (!missing.empty() || batch_sizes.size() > 1 || batch_sizes.empty()) {
+        std::string batch_info = "";
+        if (batch_sizes.empty()) {
+            batch_info = "<no batch information>";
+        }
+        else if (batch_sizes.size() > 1) {
+            for (auto&& i : batch_sizes)
+                batch_info += format("\n    {}: {}", i.first, i.second);
+        }
+        throw libsd_exception(ErrorCode::RUNTIME_ERROR,
+            format("Graph verification failed! At least one input or output tensor has not been assigned memory location and/or operates on different batch size!\n    Missing allocations: {}\n    Conflicting batch size: {}\n", missing, std::move(batch_info)),
+            __func__, __FILE__, STR(__LINE__));
+    }
+}
+
+
+void QnnGraph::execute() {
+    api->execute_graph(graph, inputs, outputs);
 }
 
 
 QnnGraph::QnnGraph(qnn_hnd<Qnn_ContextHandle_t> ctx, std::shared_ptr<QnnApi> api, const char* name, Qnn_Tensor_t* inputs, unsigned int num_inputs,
     Qnn_Tensor_t* outputs, unsigned int num_outputs, Qnn_GraphHandle_t graph)
     : name(name), inputs(std::span(inputs, num_inputs)), outputs(std::span(outputs, num_outputs)), graph(graph), ctx(ctx), api(api) {
+    if (is_enabled(LogLevel::DEBUG)) {
+        debug("New graph: {}", name);
+        debug("    Num inputs: {}", num_inputs);
+        for (auto&& t : this->inputs) {
+            debug("        {}: {}, {}, {}, {}", t.v1.name, _format_to_str(t.v1.dataFormat), _dtype_to_str(t.v1.dataType), _ttype_to_str(t.v1.type), std::span(t.v1.dimensions, t.v1.rank));
+        }
+        debug("    Num outputs: {}", num_outputs);
+        for (auto&& t : this->outputs) {
+            debug("        {}: {}, {}, {}, {}", t.v1.name, _format_to_str(t.v1.dataFormat), _dtype_to_str(t.v1.dataType), _ttype_to_str(t.v1.type), std::span(t.v1.dimensions, t.v1.rank));
+        }
+    }
+
+    for (auto&& i : range(num_inputs))
+        input_slots.emplace_back(graph_slot{ .target=inputs[i], .current_tensor=nullptr });
+    for (auto&& i : range(num_outputs))
+        output_slots.emplace_back(graph_slot{ .target=outputs[i], .current_tensor=nullptr });
+
+    if (api->get_backend_type() == QnnBackendType::HTP) {
+        // QnnHtpGraph_CustomConfig_t vtcm;
+        // vtcm.option = QNN_HTP_GRAPH_CONFIG_OPTION_VTCM_SIZE;
+        // vtcm.vtcmSizeInMB = 8;
+
+        // QnnHtpGraph_CustomConfig_t hvx;
+        // hvx.option = QNN_HTP_GRAPH_CONFIG_OPTION_NUM_HVX_THREADS;
+        // hvx.numHvxThreads = 4;
+
+        // QnnGraph_Config_t opt1;
+        // opt1.option = QNN_GRAPH_CONFIG_OPTION_CUSTOM;
+        // opt1.customConfig = &hvx;
+
+        // QnnGraph_Config_t opt2;
+        // opt1.option = QNN_GRAPH_CONFIG_OPTION_CUSTOM;
+        // opt1.customConfig = &vtcm;
+        // const QnnGraph_Config_t* options[] = { &opt1, &opt2, nullptr };
+
+        // api->set_graph_config(graph, options);
+    }
 }
 
 
@@ -396,10 +639,17 @@ QnnContext::QnnContext(qnn_hnd<Qnn_ContextHandle_t> ctx, std::vector<QnnGraph>&&
 
 
 QnnBackend::QnnBackend(QnnBackendType backend, std::list<std::string> const& op_packages, bool burst) 
-    : api(QnnApi::get(backend)) {
+    : api(QnnApi::get(backend)), burst(burst) {
 
     _init_backend();
     _init_device();
+    _init_performance();
+}
+
+
+QnnBackend::~QnnBackend() {
+    if (_htp_power_config_id)
+        _htp_perf_infra->destroyPowerConfigId(_htp_power_config_id.value());
 }
 
 
@@ -432,6 +682,108 @@ void QnnBackend::_init_device() {
     } else {
         device_hnd = api->create_device(nullptr);
     }
+}
+
+
+void QnnBackend::_init_performance() {
+    if (api->get_backend_type() != QnnBackendType::HTP || !burst)
+        return;
+
+    debug("Creating HTP power configurations");
+    QnnDevice_Infrastructure_t deviceInfra = api->get_device_infrastructure();
+    QnnHtpDevice_Infrastructure_t* htpInfra = reinterpret_cast<QnnHtpDevice_Infrastructure_t*>(deviceInfra);
+    _htp_perf_infra = htpInfra->perfInfra;
+
+    _htp_power_config_id.emplace(1);
+    uint32_t deviceId = 0;
+    uint32_t coreId = 0;
+    _htp_perf_infra->createPowerConfigId(deviceId, coreId, &_htp_power_config_id.value());
+
+    //Initialize the power config and select the voltage corner values for the performance setting.
+    _htp_burst_power_config.emplace();
+    {
+        auto&& power_config = _htp_burst_power_config.value();
+        std::memset(&power_config, 0, sizeof(power_config));
+
+        power_config.option = QNN_HTP_PERF_INFRASTRUCTURE_POWER_CONFIGOPTION_DCVS_V3;
+        power_config.dcvsV3Config.dcvsEnable = 1;
+        power_config.dcvsV3Config.setDcvsEnable = 1;
+        power_config.dcvsV3Config.contextId = _htp_power_config_id.value();
+
+        // refer QnnHtpPerfInfrastructure.h
+        power_config.dcvsV3Config.powerMode = QNN_HTP_PERF_INFRASTRUCTURE_POWERMODE_PERFORMANCE_MODE;
+        power_config.dcvsV3Config.setSleepLatency = 1;//True to consider Latency parameter otherwise False
+        power_config.dcvsV3Config.setBusParams = 1;//True to consider Bus parameter otherwise False
+        power_config.dcvsV3Config.setCoreParams = 1;//True to consider Core parameter otherwise False
+        power_config.dcvsV3Config.setSleepDisable = 0;//True to consider sleep disable/enable parameter otherwise False
+        power_config.dcvsV3Config.sleepDisable = 0;//True to disable sleep, False to re-enable sleep
+
+        //Set Sleep latency parameter
+        power_config.dcvsV3Config.sleepLatency =  40;
+
+        //set Bus Clock Parameters (refer QnnHtpPerfInfrastructure.h)
+        power_config.dcvsV3Config.busVoltageCornerMin = DCVS_VOLTAGE_VCORNER_TURBO_PLUS;
+        power_config.dcvsV3Config.busVoltageCornerTarget = DCVS_VOLTAGE_VCORNER_TURBO_PLUS;
+        power_config.dcvsV3Config.busVoltageCornerMax = DCVS_VOLTAGE_VCORNER_TURBO_PLUS;
+
+        //set Core Clock Parameters (refer QnnHtpPerfInfrastructure.h)
+        power_config.dcvsV3Config.coreVoltageCornerMin = DCVS_VOLTAGE_VCORNER_TURBO_PLUS;
+        power_config.dcvsV3Config.coreVoltageCornerTarget = DCVS_VOLTAGE_VCORNER_TURBO_PLUS;
+        power_config.dcvsV3Config.coreVoltageCornerMax = DCVS_VOLTAGE_VCORNER_TURBO_PLUS;
+    }
+
+    _htp_normal_power_config.emplace();
+    {
+        auto&& power_config = _htp_normal_power_config.value();
+        std::memset(&power_config, 0, sizeof(power_config));
+
+        power_config.option = QNN_HTP_PERF_INFRASTRUCTURE_POWER_CONFIGOPTION_DCVS_V3;
+        power_config.dcvsV3Config.dcvsEnable = 1;
+        power_config.dcvsV3Config.setDcvsEnable = 1;
+        power_config.dcvsV3Config.contextId = _htp_power_config_id.value();
+
+        // refer QnnHtpPerfInfrastructure.h
+        power_config.dcvsV3Config.powerMode = QNN_HTP_PERF_INFRASTRUCTURE_POWERMODE_PERFORMANCE_MODE;
+        power_config.dcvsV3Config.setSleepLatency = 1;//True to consider Latency parameter otherwise False
+        power_config.dcvsV3Config.setBusParams = 1;//True to consider Bus parameter otherwise False
+        power_config.dcvsV3Config.setCoreParams = 1;//True to consider Core parameter otherwise False
+        power_config.dcvsV3Config.setSleepDisable = 0;//True to consider sleep disable/enable parameter otherwise False
+        power_config.dcvsV3Config.sleepDisable = 0;//True to disable sleep, False to re-enable sleep
+
+        //Set Sleep latency parameter
+        power_config.dcvsV3Config.sleepLatency =  1000;
+
+        //set Bus Clock Parameters (refer QnnHtpPerfInfrastructure.h)
+        power_config.dcvsV3Config.busVoltageCornerMin = DCVS_VOLTAGE_VCORNER_NOM;
+        power_config.dcvsV3Config.busVoltageCornerTarget = DCVS_VOLTAGE_VCORNER_NOM;
+        power_config.dcvsV3Config.busVoltageCornerMax = DCVS_VOLTAGE_VCORNER_NOM;
+
+        //set Core Clock Parameters (refer QnnHtpPerfInfrastructure.h)
+        power_config.dcvsV3Config.coreVoltageCornerMin = DCVS_VOLTAGE_VCORNER_NOM;
+        power_config.dcvsV3Config.coreVoltageCornerTarget = DCVS_VOLTAGE_VCORNER_NOM;
+        power_config.dcvsV3Config.coreVoltageCornerMax = DCVS_VOLTAGE_VCORNER_NOM;
+    }
+}
+
+
+void QnnBackend::start_burst() {
+    if (!burst || !_htp_power_config_id)
+        return;
+
+    debug("Switching to burst power mode...");
+    const QnnHtpPerfInfrastructure_PowerConfig_t *cfgs[] = { &_htp_burst_power_config.value(), nullptr };
+    _htp_perf_infra->setPowerConfig(_htp_power_config_id.value(), cfgs);
+}
+
+
+
+void QnnBackend::end_burst() {
+    if (!burst || !_htp_power_config_id)
+        return;
+
+    debug("Switching to normal power mode...");
+    const QnnHtpPerfInfrastructure_PowerConfig_t *cfgs[] = { &_htp_normal_power_config.value(), nullptr };
+    _htp_perf_infra->setPowerConfig(_htp_power_config_id.value(), cfgs);
 }
 
 

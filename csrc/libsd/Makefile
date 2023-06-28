@@ -41,32 +41,32 @@ clean_x86:
 
 all_android: aarch64-android arm-android
 
-aarch64-android: check_ndk clean_aarch64-android
+aarch64-android: check_ndk
 	$(call build_if_exists,$(libsd),$(ANDROID_NDK_ROOT)/ndk-build APP_ALLOW_MISSING_DEPS=true APP_ABI="arm64-v8a" NDK_PROJECT_PATH=./ NDK_APPLICATION_MK=$(make_dir)/Application.mk APP_BUILD_SCRIPT=$(make_dir)/Android.mk)
-	@$(rename_target_dirs)
+	mkdir -p bin/aarch64-android
+	mv libs/arm64-v8a/* bin/aarch64-android
+	rm -rf libs
 
-arm-android: check_ndk clean_arm-android
+arm-android: check_ndk
 	$(call build_if_exists,$(libsd),$(ANDROID_NDK_ROOT)/ndk-build APP_ALLOW_MISSING_DEPS=true APP_ABI="armeabi-v7a" NDK_PROJECT_PATH=./ NDK_APPLICATION_MK=$(make_dir)/Application.mk APP_BUILD_SCRIPT=$(make_dir)/Android.mk)
-	@$(rename_target_dirs)
+	mkdir -p bin/arm-android
+	mv libs/armeabi-v7a/* bin/arm-android
+	rm -rf libs
 
 clean_android: check_ndk clean_arm-android clean_aarch64-android
 
 clean_arm-android:
-	@rm -rf bin/arm-android
-	@rm -rf obj/local/arm-android
+	@rm -rf bin/arm-android/libsd.so bin/arm-android/test
+	@rm -rf obj/local/armeabi-v7a
 
 clean_aarch64-android:
-	@rm -rf bin/aarch64-android
-	@rm -rf obj/local/aarch64-android
+	@rm -rf bin/aarch64-android/libsd.so bin/aarch64-android/test
+	@rm -rf obj/local/arm64-v8a
 
 
 # utilities
 # Syntax: $(call build_if_exists <dir>,<cmd>)
 build_if_exists = $(if $(wildcard $(1)),$(2),$(warning WARNING: $(1) does not exist. Skipping Compilation))
-rename_target_dirs = find . -type d -execdir rename 's/arm64-v8a/aarch64-android/' '{}' \+ \
-                     && find . -type d -execdir rename 's/armeabi-v7a/arm-android/' '{}' \+ \
-                     && mv libs/* bin/  \
-                     && rm -rf libs \
 
 check_ndk:
 ifeq ($(ANDROID_NDK_ROOT),)

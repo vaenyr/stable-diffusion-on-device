@@ -14,11 +14,11 @@ namespace libsd {
 
 
 struct StableDiffusionModel {
-    graph_ref cond_model;
-    graph_ref decoder;
-    graph_ref unet_inputs;
-    graph_ref unet_middle;
     graph_ref unet_outputs;
+    graph_ref unet_inputs;
+    graph_ref cond_model;
+    graph_ref unet_middle;
+    graph_ref decoder;
     graph_ref unet_head;
 };
 
@@ -67,6 +67,7 @@ private:
     std::vector<float> y_uncond;
 
     std::vector<std::vector<float>> t_schedule; // sequence of encoded timesteps
+    tensor_list tensors;
 };
 
 }

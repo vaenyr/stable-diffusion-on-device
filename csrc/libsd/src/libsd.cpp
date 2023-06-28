@@ -90,6 +90,7 @@ static ErrorCode setup_impl(void** context, const char* models_dir, unsigned int
     try {
         cptr->initialize_qnn();
         cptr->load_models();
+        cptr->prepare_buffers();
         cptr->prepare_solver();
         cptr->prepare_schedule(steps);
     } catch (libsd_exception const& e) {

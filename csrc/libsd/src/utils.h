@@ -9,9 +9,20 @@
 #include <sstream>
 #include <type_traits>
 #include <functional>
+#include <vector>
+#include <list>
+#include <map>
+#include <span>
 
 
 namespace libsd {
+
+template <class T>
+inline std::string hex(T&& t) {
+    std::stringstream ss;
+    ss << "0x" << std::hex << t;
+    return ss.str();
+}
 
 namespace details {
 
@@ -52,11 +63,70 @@ inline std::enable_if_t<is_valid_std_to_string_v<T&&>, std::string> to_string(T&
 
 template <class T>
 inline std::enable_if_t<std::is_pointer_v<std::remove_reference_t<T>>, std::string> to_string(T&& t) {
-    std::stringstream ss;
-    ss << "0x" << std::hex << reinterpret_cast<const std::uintptr_t>(t);
-    return ss.str();
+    return hex(reinterpret_cast<const std::uintptr_t>(t));
 }
 
+template <class T>
+inline std::string to_string(std::vector<T> const& v) {
+    std::string ret = "[";
+    bool first = true;
+    for (auto&& e : v) {
+        if (first)
+            first = false;
+        else
+            ret.append(", ");
+        ret.append(to_string(e));
+    }
+    ret.append("]");
+    return ret;
+}
+
+template <class T>
+inline std::string to_string(std::list<T> const& v) {
+    std::string ret = "[";
+    bool first = true;
+    for (auto&& e : v) {
+        if (first)
+            first = false;
+        else
+            ret.append(", ");
+        ret.append(to_string(e));
+    }
+    ret.append("]");
+    return ret;
+}
+
+template <class T, std::size_t Extend>
+inline std::string to_string(std::span<T, Extend> const& v) {
+    std::string ret = "[";
+    bool first = true;
+    for (auto&& e : v) {
+        if (first)
+            first = false;
+        else
+            ret.append(", ");
+        ret.append(to_string(e));
+    }
+    ret.append("]");
+    return ret;
+}
+
+template <class K, class V>
+inline std::string to_string(std::map<K, V> const& v) {
+    std::string ret = "{";
+    bool first = true;
+    for (auto&& e : v) {
+        if (first)
+            first = false;
+        else
+            ret.append(", ");
+        ret.append(to_string(e.first));
+        ret.append(": ");
+        ret.append(to_string(e.second));
+    }
+    ret.append("}");
+    return ret;
+}
 
 template <class Arg, class... T>
 std::string format(std::size_t pos, std::string const& fmt, Arg&& arg, T&&... args) {
@@ -78,7 +148,19 @@ std::string format(std::size_t pos, std::string&& fmt, Arg&& arg, T&&... args) {
     return format(pos + rep.length(), fmt.substr(0, pos) + rep + fmt.substr(pos+2), std::forward<T>(args)...);
 }
 
-}
+template <class T>
+struct range_t {
+    range_t& begin() { return *this; }
+    range_t& end() { return *this; }
+    range_t& operator ++() { ++min; return *this; }
+    T& operator *() { return min; }
+    bool operator==(range_t const& r) const { return min == r.max; }
+
+    T min;
+    T max;
+};
+
+} //details
 
 template <class... T>
 std::string format(std::string const& fmt, T&&... args) {
@@ -92,6 +174,18 @@ std::string format(std::string&& fmt, T&&... args) {
 
 std::size_t get_file_size(std::string const& path);
 bool read_file_content(std::string const& path, std::vector<unsigned char>& buffer);
+
+
+template <class T>
+auto range(T&& max) {
+    return details::range_t<std::remove_reference_t<T>>{ .min=std::remove_reference_t<T>(), .max=std::forward<T>(max) };
+}
+
+
+template <class T>
+auto range(T&& min, T&& max) {
+    return details::range_t<std::remove_reference_t<T>>{ .min=std::forward<T>(min), .max=std::forward<T>(max) };
+}
 
 }
 
