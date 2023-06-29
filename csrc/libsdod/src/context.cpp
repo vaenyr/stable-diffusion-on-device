@@ -65,6 +65,9 @@ void Context::load_models() {
 
 
 void Context::prepare_solver() {
+    if (_solver)
+        return;
+    _solver.emplace(1000, 0.00085, 0.0120);
     info("ODE solver prepared!");
 }
 
@@ -135,7 +138,8 @@ void Context::prepare_schedule(unsigned int steps) {
         throw libsdod_exception(ErrorCode::INVALID_ARGUMENT, format("steps!=20 is currently not implemented, got: {}", steps), __func__, __FILE__, STR(__LINE__));
 
     //TODO: compute schedule properly, this is taken from plms.py with 20 ddim steps
-    std::vector<uint32_t> _schedule = { 951, 901, 851, 801, 751, 701, 651, 601, 551, 501, 451, 401, 351, 301, 251, 201, 151, 101, 51, 1 };
+    std::vector<uint32_t> _schedule;
+    _solver->prepare(steps, _schedule);
 
     float log_period = -std::log(10000.0f);
 
@@ -185,6 +189,7 @@ void Context::generate(std::string const& prompt, float guidance, Buffer<unsigne
     auto&& tock = std::chrono::high_resolution_clock::now();
     _report_time("Conditioning", tick, tock);
 
+    unsigned int step = 0;
     for (auto&& t_host : t_embeddings) {
         tick = std::chrono::high_resolution_clock::now();
 
@@ -209,7 +214,7 @@ void Context::generate(std::string const& prompt, float guidance, Buffer<unsigne
             y->get_data(y_host, 1-guidance);
         }
 
-        // TODO: ODE solver step, should write to x_host
+        _solver->update(step++, x_host, y_host);
 
         tock = std::chrono::high_resolution_clock::now();
         _report_time("Single iteration", tick, tock);
@@ -230,7 +235,6 @@ void Context::generate(std::string const& prompt, float guidance, Buffer<unsigne
         auto f = img_host[i];
         output_ptr[i] = static_cast<uint8_t>(255 * std::clamp(((f + 1) / 2), 0.0f, 1.0f));
     }
-
 
     info("Image successfully generated!");
     auto&& end = std::chrono::high_resolution_clock::now();

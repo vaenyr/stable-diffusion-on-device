@@ -8,6 +8,7 @@
 #include "buffer.h"
 #include "qnn_context.h"
 #include "logging.h"
+#include "dpm_solver.h"
 
 
 namespace libsdod {
@@ -56,6 +57,8 @@ private:
 
     ErrorTable _error_table;
     Logger _logger;
+
+    std::optional<DPMSolver> _solver;
 
     std::shared_ptr<QnnBackend> _qnn;
     std::optional<StableDiffusionModel> _model;
