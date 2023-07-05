@@ -4,6 +4,7 @@
 #include "context.h"
 #include "utils.h"
 
+#include <string>
 #include <cstring>
 
 #define LIBSDOD_VERSION_MAJOR 1
@@ -90,6 +91,7 @@ static ErrorCode setup_impl(void** context, const char* models_dir, unsigned int
     try {
         cptr->initialize_qnn();
         cptr->load_models();
+        cptr->load_tokenizer();
         cptr->prepare_buffers();
         cptr->prepare_solver();
         cptr->prepare_schedule(steps);

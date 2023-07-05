@@ -83,7 +83,7 @@ LIBSDOD_API int libsdod_release(void* context);
 /* Run a diffusion process.
 
    context - a previously prepared context obtained by a call to setup
-   prompt - a user prompt to guide the generation process
+   prompt - a null-terminated, UTF8-encoded user prompt to guide the generation process
    guidance_scale - scaling factor for the classifier-free guidance: scale * noise(x, t, p) - (1 - scale) * noise(x, t, ""), SD1.5 default is 7.5
    image_out - output buffer that will hold a resulting RGB image, in [H, W, C] order, values in range 0-255
 

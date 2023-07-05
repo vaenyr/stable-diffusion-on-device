@@ -8,26 +8,40 @@
 
 namespace libsdod {
 
+struct MergeHash {
+    std::size_t operator()(std::pair<std::string, std::string> const& p) const {
+        return std::hash<std::string>()(p.first + p.second);
+    }
+};
+
 class Tokenizer {
 public:
-    typedef std::u8string input_str_type; // expects utf-8 encoded str as input
-    typedef std::u8string internal_str_type; // uses utf-8 encoded str internally
     typedef uint16_t token_type;
 
 public:
     Tokenizer(std::string const& bpe_file);
 
-    std::vector<token_type> tokenize(input_str_type const& str, unsigned int context_len = 77) const;
+    void tokenize(std::vector<token_type>& out, std::string const& str, unsigned int context_len = 77) const;
+
+    std::vector<token_type> tokenize(std::string const& str, unsigned int context_len = 77) const {
+        std::vector<token_type> ret;
+        ret.reserve(context_len);
+        tokenize(ret, str, context_len);
+        return ret;
+    }
 
 private:
-    std::unordered_map<internal_str_type,token_type> tokens;
-    std::unordered_map<std::pair<internal_str_type, internal_str_type>,token_type> ranks;
+    std::unordered_map<std::string, token_type> tokens;
+    std::unordered_map<std::pair<std::string, std::string>, unsigned int, MergeHash> ranks;
 
     token_type start_token;
     token_type end_token;
 
-    void bpe(std::vector<token_type>& buff, internal_str_type token) const;
+    void bpe(std::vector<token_type>& buff, std::string token, unsigned int max_len) const;
 };
+
+
+
 
 }
 

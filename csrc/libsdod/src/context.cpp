@@ -12,6 +12,10 @@ Context::Context(std::string const& models_dir, unsigned int latent_channels, un
     : models_dir(models_dir), latent_channels(latent_channels), latent_spatial(latent_spatial), upscale_factor(upscale_factor) {
     _error_table = allocate_error_table();
     _logger.set_level(log_level);
+    if (models_dir.empty())
+        this->models_dir = '.';
+    else if (models_dir.back() == '/')
+        this->models_dir.pop_back();
 }
 
 
@@ -64,7 +68,20 @@ void Context::load_models() {
 }
 
 
+void Context::load_tokenizer() {
+    if (_failed_and_gave_up)
+        return;
+    if (_tokenizer)
+        return;
+
+    _tokenizer.emplace(models_dir + "/ctokenizer.txt");
+    info("Tokenizer created!");
+}
+
+
 void Context::prepare_solver() {
+    if (_failed_and_gave_up)
+        return;
     if (_solver)
         return;
     _solver.emplace(1000, 0.00085, 0.0120);
@@ -73,12 +90,15 @@ void Context::prepare_solver() {
 
 
 void Context::prepare_buffers() {
+    if (_failed_and_gave_up)
+        return;
     if (!_model)
         return;
 
     // allocate important tensors
     tokens.emplace(_model->cond_model.allocate_input(0));
-    auto& p = other_tensors.emplace_back(_model->cond_model.allocate_output(0));
+    p_cond.emplace(_model->cond_model.allocate_output(0));
+    p_uncond.emplace(_model->cond_model.allocate_output(0));
     x.emplace(_model->unet_inputs.allocate_input(0));
     t.emplace(_model->unet_inputs.allocate_input(1));
     y.emplace(_model->unet_head.allocate_output(0));
@@ -89,9 +109,13 @@ void Context::prepare_buffers() {
     other_tensors.emplace_back(_model->unet_outputs.attach_input(1, t.value()));
 
     // attach prompt
-    other_tensors.emplace_back(_model->unet_inputs.attach_input(2, p, true, false)); // TODO: inputs seem to be transposed... for now ignore
-    other_tensors.emplace_back(_model->unet_middle.attach_input(2, p, true, false));
-    other_tensors.emplace_back(_model->unet_outputs.attach_input(2, p, true, false));
+    p_cond_inputs.emplace_back(_model->unet_inputs.attach_input(2, p_cond.value(), true, false)); // TODO: inputs seem to be transposed... for now ignore
+    p_cond_inputs.emplace_back(_model->unet_middle.attach_input(2, p_cond.value(), true, false));
+    p_cond_inputs.emplace_back(_model->unet_outputs.attach_input(2, p_cond.value(), true, false));
+
+    p_uncond_inputs.emplace_back(_model->unet_inputs.attach_input(2, p_uncond.value(), true, false)); // TODO: inputs seem to be transposed... for now ignore
+    p_uncond_inputs.emplace_back(_model->unet_middle.attach_input(2, p_uncond.value(), true, false));
+    p_uncond_inputs.emplace_back(_model->unet_outputs.attach_input(2, p_uncond.value(), true, false));
 
     // cond model, other output (TODO: get rid of? seems unused)
     other_tensors.emplace_back(_model->cond_model.allocate_output(1));
@@ -125,15 +149,30 @@ void Context::prepare_buffers() {
     _model->unet_head.verify();
 
     tokens_host.resize(77);
+    empty_prompt_host.resize(77);
     x_host.resize(latent_channels * latent_spatial * latent_spatial);
     y_host.resize(latent_channels * latent_spatial * latent_spatial);
     img_host.resize(3 * latent_spatial * upscale_factor * latent_spatial * upscale_factor);
+
+    // precompute empty prompt conditioning
+    _tokenizer->tokenize(empty_prompt_host, "");
+    tokens->set_data(empty_prompt_host);
+    p_uncond->activate();
+    _model->cond_model.execute();
+
+    p_cond->activate();
+    for (auto&& t : p_cond_inputs)
+        t.activate();
 
     info("Input/output buffers created and prepared!");
 }
 
 
 void Context::prepare_schedule(unsigned int steps) {
+    if (_failed_and_gave_up)
+        return;
+    if (!_solver)
+        return;
     if (steps != 20)
         throw libsdod_exception(ErrorCode::INVALID_ARGUMENT, format("steps!=20 is currently not implemented, got: {}", steps), __func__, __FILE__, STR(__LINE__));
 
@@ -166,6 +205,10 @@ void Context::generate(std::string const& prompt, float guidance, Buffer<unsigne
         return;
     if (!_model)
         return;
+    if (!_solver)
+        return;
+    if (!_tokenizer)
+        return;
 
     auto&& start = std::chrono::high_resolution_clock::now();
 
@@ -178,6 +221,8 @@ void Context::generate(std::string const& prompt, float guidance, Buffer<unsigne
         auto&& diff = std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1);
         info("{} took {}ms", name, diff.count());
     };
+
+    tokens_host = _tokenizer->tokenize(prompt);
 
     auto&& burst_scope_guard = scope_guard([this](){ _qnn->start_burst(); }, [this]() { _qnn->end_burst(); });
     (void)burst_scope_guard;
@@ -206,12 +251,18 @@ void Context::generate(std::string const& prompt, float guidance, Buffer<unsigne
         else {
             y->get_data(y_host, guidance);
 
+            for (auto&& t : p_uncond_inputs)
+                t.activate();
+
             _model->unet_inputs.execute();
             _model->unet_middle.execute();
             _model->unet_outputs.execute();
             _model->unet_head.execute();
 
             y->get_data(y_host, 1-guidance);
+
+            for (auto&& t : p_cond_inputs)
+                t.activate();
         }
 
         _solver->update(step++, x_host, y_host);

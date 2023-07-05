@@ -37,6 +37,9 @@ all_x86:
 clean_x86:
 	@rm -rf bin/x86_64-linux-clang/libsdod.so bin/x86_64-linux-clang/test obj/x86_64-linux-clang
 
+tests:
+	$(call build_if_exists,test,$(CXX) -std=c++20 -g -O0 -I src -I $(QNN_SDK_ROOT)/include test/test_tokenizer.cpp src/tokenizer.cpp src/utils.cpp src/errors.cpp -o bin/x86_64-linux-clang/test_tokenizer)
+
 # Android Targets
 
 all_android: aarch64-android arm-android

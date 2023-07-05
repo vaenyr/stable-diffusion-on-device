@@ -9,6 +9,7 @@
 #include "qnn_context.h"
 #include "logging.h"
 #include "dpm_solver.h"
+#include "tokenizer.h"
 
 
 namespace libsdod {
@@ -31,6 +32,7 @@ public:
 
     void initialize_qnn();
     void load_models();
+    void load_tokenizer();
     void prepare_solver();
     void prepare_buffers();
     void prepare_schedule(unsigned int steps);
@@ -62,8 +64,10 @@ private:
 
     std::shared_ptr<QnnBackend> _qnn;
     std::optional<StableDiffusionModel> _model;
+    std::optional<Tokenizer> _tokenizer;
 
-    std::vector<unsigned int> tokens_host;
+    std::vector<Tokenizer::token_type> tokens_host;
+    std::vector<Tokenizer::token_type> empty_prompt_host;
     std::vector<float> x_host;
     std::vector<float> y_host;
     std::vector<float> img_host;
@@ -73,10 +77,15 @@ private:
     unsigned int unet_dim = 1280; // TODO: expose as arg?
 
     std::optional<QnnTensor> tokens;
+    std::optional<QnnTensor> p_cond;
+    std::optional<QnnTensor> p_uncond;
     std::optional<QnnTensor> x;
     std::optional<QnnTensor> t;
     std::optional<QnnTensor> y;
     std::optional<QnnTensor> img;
+
+    std::list<QnnTensor> p_cond_inputs;
+    std::list<QnnTensor> p_uncond_inputs;
 
     tensor_list other_tensors;
 };

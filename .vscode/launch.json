@@ -1,0 +1,21 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Tokenizer test",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/csrc/libsdod/bin/x86_64-linux-clang/test_tokenizer",
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}/csrc/libsdod/bin/x86_64-linux-clang",
+            "args": [],
+            "linux": {
+                "MIMode": "gdb",
+                "miDebuggerPath": "/usr/bin/gdb"
+            }
+        }
+    ]
+}
