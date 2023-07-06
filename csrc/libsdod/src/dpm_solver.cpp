@@ -2,6 +2,9 @@
 #include "errors.h"
 #include "utils.h"
 
+#include <iostream>
+
+
 namespace libsdod {
 namespace {
 
@@ -94,6 +97,7 @@ void DPMSolver::prepare(unsigned int steps, std::vector<unsigned int>& model_ts)
         log_alphas[i] = interpolate(ts[i], all_t, all_log_alpha, interpolate_hint);
         lambdas[i] = log_alphas[i] - (0.5 * std::log(1  - std::exp(2 * log_alphas[i])));
         sigmas[i] = std::sqrt(1 - std::exp(2 * log_alphas[i]));
+        alphas[i] = std::exp(log_alphas[i]);
 
         if (i)
             phis[i] = std::expm1(-(lambdas[i] - lambdas[i-1]));
@@ -107,11 +111,15 @@ void DPMSolver::prepare(unsigned int steps, std::vector<unsigned int>& model_ts)
     }
 }
 
+using fs = std::initializer_list<double>;
+
 
 void DPMSolver::update(unsigned int step, std::vector<float>& x,  std::vector<float>& y) {
     auto order = (step == 0 ? 1 : (step < 10 ? std::min<unsigned int>(2, ts.size() - step) : 2));
     switch (order) {
     case 1:
+        std::cout << format("SS DPM, t: {}, lambda: {}, log(a): {}, sigma: {}, alpha: {}, phi: {}", fs{ ts[step], ts[step+1] }, fs{ lambdas[step], lambdas[step+1] },
+            fs{ log_alphas[step], log_alphas[step+1] }, fs{ sigmas[step], sigmas[step+1] }, alphas[step+1], phis[step+1]) << std::endl;
         scale<float>(x, sigmas[step+1]/sigmas[step]);
         accumulate<float>(x, y, -alphas[step+1]*phis[step+1]);
         break;

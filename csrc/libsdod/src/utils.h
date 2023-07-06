@@ -128,6 +128,21 @@ inline std::string to_string(std::map<K, V> const& v) {
     return ret;
 }
 
+template <class T>
+inline std::string to_string(std::initializer_list<T> const& t) {
+    std::string ret = "{";
+    bool first = true;
+    for (auto&& e : t) {
+        if (first)
+            first = false;
+        else
+            ret.append(", ");
+        ret.append(to_string(e));
+    }
+    ret.append("}");
+    return ret;
+}
+
 template <class Arg, class... T>
 std::string format(std::size_t pos, std::string const& fmt, Arg&& arg, T&&... args) {
     pos = get_next_insertion_point(fmt, pos);

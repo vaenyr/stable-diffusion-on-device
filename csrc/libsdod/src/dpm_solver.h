@@ -15,6 +15,16 @@ public:
     void prepare(unsigned int steps, std::vector<unsigned int>& model_ts);
     void update(unsigned int step, std::vector<float>& x,  std::vector<float>& y);
 
+    auto& get_all_t() const { return all_t; }
+    auto& get_all_log_alpha() const { return all_log_alpha; }
+    auto& get_ts() const { return ts; }
+    auto& get_log_alphas() const { return log_alphas; }
+    auto& get_lambdas() const { return lambdas; }
+    auto& get_sigmas() const { return sigmas; }
+    auto& get_alphas() const { return alphas; }
+    auto& get_phis() const { return phis; }
+    auto& get_i2rs() const { return i2rs; }
+
 private:
     // defined for the original time steps (e.g., 1000)
     std::vector<double> all_t;
