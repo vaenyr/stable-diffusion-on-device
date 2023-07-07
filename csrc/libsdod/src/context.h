@@ -3,6 +3,7 @@
 
 #include <string>
 #include <optional>
+#include <random>
 
 #include "errors.h"
 #include "buffer.h"
@@ -37,6 +38,8 @@ public:
     void prepare_buffers();
     void prepare_schedule(unsigned int steps);
 
+    void set_seed(unsigned int seed);
+
     void generate(std::string const& prompt, float guidance, Buffer<unsigned char>& output);
 
     ErrorTable get_error_table() const { return _error_table; }
@@ -59,6 +62,9 @@ private:
 
     ErrorTable _error_table;
     Logger _logger;
+
+    std::mt19937 _random_gen;
+    std::normal_distribution<float> _normal;
 
     std::optional<DPMSolver> _solver;
 

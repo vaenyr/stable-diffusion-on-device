@@ -347,6 +347,13 @@ qnn_hnd<Qnn_ContextHandle_t> QnnApi::create_context(std::vector<unsigned char> c
 }
 
 
+qnn_hnd<Qnn_ContextHandle_t> QnnApi::create_context(mmap_t const& buffer, Qnn_BackendHandle_t backend, Qnn_DeviceHandle_t device, const QnnContext_Config_t** cfg) const {
+    Qnn_ContextHandle_t ret = nullptr;
+    _generic_qnn_api_call(interface.contextCreateFromBinary, "contextCreateFromBinary", __func__, __FILE__, STR(__LINE__), backend, device, cfg, buffer.data, buffer.size, &ret, nullptr);
+    return qnn_hnd<Qnn_ContextHandle_t>(ret, [this](Qnn_ContextHandle_t hnd) { interface.contextFree(hnd, nullptr); });
+}
+
+
 void QnnApi::register_op_package(std::string const& package_path, std::string const& package_interface_provider) const {
     throw libsdod_exception(ErrorCode::INTERNAL_ERROR, "Not implemented", __func__, __FILE__, STR(__LINE__));
 }
@@ -359,6 +366,20 @@ QnnSystemContext_BinaryInfo_t const& QnnApi::get_binary_info(std::vector<unsigne
     const QnnSystemContext_BinaryInfo_t* binary_info = nullptr;
     Qnn_ContextBinarySize_t binary_info_size = 0;
     _generic_qnn_api_call(system_interface.systemContextGetBinaryInfo, "systemContextGetBinaryInfo", __func__, __FILE__, STR(__LINE__), system_hnd.get(), buffer.data(), buffer.size(), &binary_info, &binary_info_size);
+    if (!binary_info)
+        throw libsdod_exception(ErrorCode::INVALID_ARGUMENT, "Returned binary info is a nullptr!", __func__, __FILE__, STR(__LINE__));
+
+    return *binary_info;
+}
+
+
+QnnSystemContext_BinaryInfo_t const& QnnApi::get_binary_info(mmap_t& buffer) const {
+    if (!system_hnd)
+        throw libsdod_exception(ErrorCode::INTERNAL_ERROR, "Attempted to get binary info of a serialized context but system context has not been created - see previous warnings", __func__, __FILE__, STR(__LINE__));
+
+    const QnnSystemContext_BinaryInfo_t* binary_info = nullptr;
+    Qnn_ContextBinarySize_t binary_info_size = 0;
+    _generic_qnn_api_call(system_interface.systemContextGetBinaryInfo, "systemContextGetBinaryInfo", __func__, __FILE__, STR(__LINE__), system_hnd.get(), buffer.data, buffer.size, &binary_info, &binary_info_size);
     if (!binary_info)
         throw libsdod_exception(ErrorCode::INVALID_ARGUMENT, "Returned binary info is a nullptr!", __func__, __FILE__, STR(__LINE__));
 
@@ -833,11 +854,19 @@ void QnnBackend::end_burst() {
 
 
 graph_refs QnnBackend::load_context(std::string const& context_blob) {
+#ifdef NO_MMAP
     std::vector<unsigned char> buffer;
     if (!read_file_content(context_blob, buffer))
         throw libsdod_exception(ErrorCode::INVALID_ARGUMENT, format("Could not read content of the context blob: {}", context_blob), __func__, __FILE__, STR(__LINE__));
 
     debug("Read {} bytes from file: {}", buffer.size(), context_blob);
+#else
+    mmap_t buffer{ context_blob };
+    if (!buffer.data)
+        throw libsdod_exception(ErrorCode::INVALID_ARGUMENT, format("Could not map content of the context blob: {}", context_blob), __func__, __FILE__, STR(__LINE__));
+
+    debug("Mapped {} bytes from file: {}", buffer.size, context_blob);
+#endif
 
     auto&& context_hnd = api->create_context(buffer, backend_hnd.get(), device_hnd.get(), nullptr);
     debug("Context handler created");

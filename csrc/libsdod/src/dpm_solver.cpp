@@ -3,6 +3,7 @@
 #include "utils.h"
 
 #include <iostream>
+#include <cassert>
 
 
 namespace libsdod {
@@ -31,15 +32,23 @@ inline double _interpolate(double x, double x1, double y1, double x2, double y2)
 
 
 double interpolate(double x, std::vector<double> const& xs, std::vector<double> const& ys, unsigned int& hint) {
-    if (x > xs.front() || x < xs.back())
+    // note: this method assumes xs is ascending, and x is descending over multiple calls with the same hint
+    // initialize hint to xs.size()
+    if (x < xs.front() || x > xs.back())
         return _interpolate(x, xs.back(), ys.back(), xs.front(), ys.front());
-    while (hint < xs.size())
-        if (x > xs[hint++])
-            break;
-    --hint;
+    while (xs[hint-1] > x) {
+        assert(hint > 1);
+        --hint;
+    }
+    //rev_hint should be larger than x
+    //rev_hint-1 should be smaller than x
+    assert(hint > 0 && hint < xs.size());
+    assert(xs[hint] > x);
+    assert(xs[hint-1] < x);
+
     if (!hint || hint > xs.size())
         throw libsdod_exception(ErrorCode::INTERNAL_ERROR, "Unreachable", __func__, __FILE__, STR(__LINE__));
-    return _interpolate(x, xs[hint], ys[hint], xs[hint-1], ys[hint-1]);
+    return _interpolate(x, xs[hint-1], ys[hint-1], xs[hint], ys[hint]);
 }
 
 
@@ -91,7 +100,7 @@ void DPMSolver::prepare(unsigned int steps, std::vector<unsigned int>& model_ts)
     phis.resize(ts.size());
     i2rs.resize(ts.size());
 
-    unsigned int interpolate_hint = 0;
+    unsigned int interpolate_hint = all_t.size();
     for (auto i : range(ts.size())) {
         model_ts[i] = ((ts[i] - 1.0 / all_t.size())*1000); // TODO: the choice of 1000 seems quite arbitrary in the DPM code, but it is what it is...
         log_alphas[i] = interpolate(ts[i], all_t, all_log_alpha, interpolate_hint);
@@ -118,13 +127,30 @@ void DPMSolver::update(unsigned int step, std::vector<float>& x,  std::vector<fl
     auto order = (step == 0 ? 1 : (step < 10 ? std::min<unsigned int>(2, ts.size() - step) : 2));
     switch (order) {
     case 1:
-        std::cout << format("SS DPM, t: {}, lambda: {}, log(a): {}, sigma: {}, alpha: {}, phi: {}", fs{ ts[step], ts[step+1] }, fs{ lambdas[step], lambdas[step+1] },
-            fs{ log_alphas[step], log_alphas[step+1] }, fs{ sigmas[step], sigmas[step+1] }, alphas[step+1], phis[step+1]) << std::endl;
+#ifdef LIBSDOD_DEBUG
+        std::cout << format("SS DPM, t: {}, lambda: {}, log(a): {}, sigma: {}, alpha: {}, phi: {}",
+            fs{ ts[step], ts[step+1] },
+            fs{ lambdas[step], lambdas[step+1] },
+            fs{ log_alphas[step], log_alphas[step+1] },
+            fs{ sigmas[step], sigmas[step+1] },
+            alphas[step+1],
+            phis[step+1]) << std::endl;
+#endif
         scale<float>(x, sigmas[step+1]/sigmas[step]);
         accumulate<float>(x, y, -alphas[step+1]*phis[step+1]);
         break;
 
     case 2:
+#ifdef LIBSDOD_DEBUG
+        std::cout << format("MS DPM, t: {}, lambda: {}, log(a): {}, sigma: {}, alpha: {}, phi: {}, i2r: {}",
+            fs{ ts[step-1], ts[step], ts[step+1] },
+            fs{ lambdas[step-1], lambdas[step], lambdas[step+1] },
+            fs{ log_alphas[step], log_alphas[step+1] },
+            fs{ sigmas[step], sigmas[step+1] },
+            alphas[step+1],
+            phis[step+1],
+            i2rs[step+1]) << std::endl;
+#endif
         scale<float>(x, sigmas[step+1]/sigmas[step]);
         accumulate<float>(x, prev_y, alphas[step+1]*phis[step+1]*i2rs[step+1]);
         accumulate<float>(x, y, -alphas[step+1]*phis[step+1]*(1 + i2rs[step+1]));

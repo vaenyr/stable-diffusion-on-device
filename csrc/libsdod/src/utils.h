@@ -56,6 +56,13 @@ inline std::string to_string(const char* s) {
     return std::string(s);
 }
 
+inline std::string to_string(double d) {
+    std::ostringstream ss;
+    ss.precision(16);
+    ss << d;
+    return ss.str();
+}
+
 template <class T>
 inline std::enable_if_t<is_valid_std_to_string_v<T&&>, std::string> to_string(T&& t) {
     return std::to_string(std::forward<T>(t));
@@ -214,6 +221,18 @@ struct scope_guard {
     scope_guard operator=(scope_guard&& other) = delete;
 
     std::function<void()> deinit;
+};
+
+
+struct mmap_t {
+    mmap_t(std::string const& path);
+    mmap_t(mmap_t const& other) = delete;
+    mmap_t(mmap_t&& other);
+    ~mmap_t();
+
+    void* data;
+    unsigned int size;
+    int fd;
 };
 
 }

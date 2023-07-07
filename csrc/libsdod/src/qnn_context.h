@@ -1,6 +1,8 @@
 #ifndef LIBSDOD_QNN_CONTEXT_H
 #define LIBSDOD_QNN_CONTEXT_H
 
+#include "utils.h"
+
 #include <list>
 #include <span>
 #include <vector>
@@ -66,10 +68,12 @@ public:
     qnn_hnd<Qnn_DeviceHandle_t> create_device(const QnnDevice_Config_t** cfg) const;
     qnn_hnd<Qnn_ContextHandle_t> create_context(Qnn_BackendHandle_t backend, Qnn_DeviceHandle_t device, const QnnContext_Config_t** cfg) const;
     qnn_hnd<Qnn_ContextHandle_t> create_context(std::vector<unsigned char> const& buffer, Qnn_BackendHandle_t backend, Qnn_DeviceHandle_t device, const QnnContext_Config_t** cfg) const;
+    qnn_hnd<Qnn_ContextHandle_t> create_context(mmap_t const& buffer, Qnn_BackendHandle_t backend, Qnn_DeviceHandle_t device, const QnnContext_Config_t** cfg) const;
 
     void register_op_package(std::string const& package_path, std::string const& package_interface_provider) const;
 
     QnnSystemContext_BinaryInfo_t const& get_binary_info(std::vector<unsigned char>& buffer) const;
+    QnnSystemContext_BinaryInfo_t const& get_binary_info(mmap_t& buffer) const;
     Qnn_GraphHandle_t retrieve_graph(Qnn_ContextHandle_t context, const char* graph_name) const;
 
     void set_graph_config(Qnn_GraphHandle_t graph, const QnnGraph_Config_t** cfg) const;

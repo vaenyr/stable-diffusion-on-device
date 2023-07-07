@@ -9,7 +9,8 @@ using namespace libsdod;
 
 
 Context::Context(std::string const& models_dir, unsigned int latent_channels, unsigned int latent_spatial, unsigned int upscale_factor, LogLevel log_level)
-    : models_dir(models_dir), latent_channels(latent_channels), latent_spatial(latent_spatial), upscale_factor(upscale_factor) {
+    : models_dir(models_dir), latent_channels(latent_channels), latent_spatial(latent_spatial), upscale_factor(upscale_factor),
+    _random_gen{ std::random_device{}() }, _normal{ 0, 1 } {
     _error_table = allocate_error_table();
     _logger.set_level(log_level);
     if (models_dir.empty())
@@ -198,6 +199,13 @@ void Context::prepare_schedule(unsigned int steps) {
 }
 
 
+void Context::set_seed(unsigned int seed) {
+    info("Using seed: {}", seed);
+    _normal.reset();
+    _random_gen.seed(seed);
+}
+
+
 void Context::generate(std::string const& prompt, float guidance, Buffer<unsigned char>& output) {
     if (_failed_and_gave_up)
         return;
@@ -233,6 +241,9 @@ void Context::generate(std::string const& prompt, float guidance, Buffer<unsigne
     _model->cond_model.execute();
     auto&& tock = std::chrono::high_resolution_clock::now();
     _report_time("Conditioning", tick, tock);
+
+    for (auto& f : x_host)
+        f = _normal(_random_gen);
 
     unsigned int step = 0;
     for (auto&& t_host : t_embeddings) {
@@ -278,7 +289,7 @@ void Context::generate(std::string const& prompt, float guidance, Buffer<unsigne
     tock = std::chrono::high_resolution_clock::now();
     _report_time("Decoding", tick, tock);
 
-    img->get_data(img_host);
+    img->get_data(img_host, 1 / 0.18215);
 
     auto* output_ptr = output.data_ptr();
     // decode img to uint8 pixels
