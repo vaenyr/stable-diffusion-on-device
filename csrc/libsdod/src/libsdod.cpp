@@ -89,12 +89,16 @@ static ErrorCode setup_impl(void** context, const char* models_dir, unsigned int
     (void)_logger_scope;
 
     try {
+#ifndef NOTHREADS
+        cptr->init_mt(steps);
+#else
         cptr->initialize_qnn();
         cptr->load_models();
         cptr->load_tokenizer();
         cptr->prepare_buffers();
         cptr->prepare_solver();
         cptr->prepare_schedule(steps);
+#endif
     } catch (libsdod_exception const& e) {
         return _error(e.code(), cptr, e.reason(), e.func(), e.file(), e.line());
     } catch (std::exception const& e) {

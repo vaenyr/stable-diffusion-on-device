@@ -4,6 +4,9 @@
 
 #include <chrono>
 #include <cmath>
+#include <array>
+#include <mutex>
+#include <thread>
 
 using namespace libsdod;
 
@@ -21,6 +24,40 @@ Context::Context(std::string const& models_dir, unsigned int latent_channels, un
 
 
 Context::~Context() {
+}
+
+
+void Context::init_mt(unsigned int steps) {
+    auto&& tick = std::chrono::high_resolution_clock::now();
+
+    auto&& init_models = std::thread([this]() {
+        auto&& _log_guard = activate_logger();
+        (void)_log_guard;
+        initialize_qnn();
+        load_models();
+        prepare_buffers();
+    });
+
+    auto&& init_tokenizer = std::thread([this]() {
+        auto&& _log_guard = activate_logger();
+        (void)_log_guard;
+        load_tokenizer();
+    });
+
+    auto&& init_solver = std::thread([this, steps]() {
+        auto&& _log_guard = activate_logger();
+        (void)_log_guard;
+        prepare_solver();
+        prepare_schedule(steps);
+    });
+
+    init_models.join();
+    init_tokenizer.join();
+    init_solver.join();
+
+    auto&& tock = std::chrono::high_resolution_clock::now();
+    auto&& diff = std::chrono::duration_cast<std::chrono::milliseconds>(tock - tick);
+    info("Initialization took {}ms", diff.count());
 }
 
 
@@ -43,27 +80,69 @@ void Context::load_models() {
     if (_model)
         return;
 
-    auto&& get_model = [this](const char* name, const char* gname) -> graph_ref {
-        info("Attempting to load a model: {}", name);
-        auto&& path = models_dir + "/" + name;
+#ifndef NOTHREADS
+    std::map<std::string, QnnGraph*> _graphs;
+    std::mutex _graphs_mutex;
+    auto&& _graph_names = std::array{ "sd_unet_outputs", "sd_unet_inputs", "cond_model", "sd_unet_middle", "decoder", "sd_unet_head" };
+
+    auto&& get_model_async = [this, &_graphs, &_graphs_mutex](const char* name) {
+        auto&& _log_guard = activate_logger();
+        (void)_log_guard;
+        std::string filename = std::string(name) + ".bin";
+        info("Attempting to load a model: {}", filename);
+        auto&& path = models_dir + "/" + filename;
         auto&& graphs = _qnn->load_context(path);
         if (graphs.empty())
             throw libsdod_exception(ErrorCode::INVALID_ARGUMENT, format("Deserialized context {} does not contain any graphs!", path), "load_models", __FILE__, STR(__LINE__));
         if (graphs.size() > 1)
             info("Warning: deserialized context {} contains more than 1 graph {}, only the first one will be used", path, graphs.size());
         auto&& ret = graphs.front();
-        ret.get().set_name(gname);
+        ret.get().set_name(name);
+        auto&& _guard = std::lock_guard<std::mutex>{ _graphs_mutex };
+        (void)_guard;
+        info("Model {} loaded", name);
+        _graphs[name] = &ret.get();
+    };
+
+    std::list<std::thread> _loading_threads;
+    for (auto&& gname : _graph_names)
+        _loading_threads.emplace_back(get_model_async, gname);
+
+    for (auto&& t : _loading_threads)
+        t.join();
+
+    _model.emplace(StableDiffusionModel{
+        .unet_outputs = *_graphs["sd_unet_outputs"],
+        .unet_inputs = *_graphs["sd_unet_inputs"],
+        .cond_model = *_graphs["cond_model"],
+        .unet_middle = *_graphs["sd_unet_middle"],
+        .decoder = *_graphs["decoder"],
+        .unet_head = *_graphs["sd_unet_head"]
+    });
+#else
+    auto&& get_model = [this](const char* name) -> graph_ref {
+        std::string filename = std::string(name) + ".bin";
+        info("Attempting to load a model: {}", filename);
+        auto&& path = models_dir + "/" + filename;
+        auto&& graphs = _qnn->load_context(path);
+        if (graphs.empty())
+            throw libsdod_exception(ErrorCode::INVALID_ARGUMENT, format("Deserialized context {} does not contain any graphs!", path), "load_models", __FILE__, STR(__LINE__));
+        if (graphs.size() > 1)
+            info("Warning: deserialized context {} contains more than 1 graph {}, only the first one will be used", path, graphs.size());
+        auto&& ret = graphs.front();
+        ret.get().set_name(name);
         return ret;
     };
 
     _model.emplace(StableDiffusionModel{
-        .unet_outputs = get_model("sd_unet_outputs.bin", "unet_outputs"),
-        .unet_inputs = get_model("sd_unet_inputs.bin", "unet_inputs"),
-        .cond_model = get_model("cond_model.bin", "cond"),
-        .unet_middle = get_model("sd_unet_middle.bin", "unet_middle"),
-        .decoder = get_model("decoder.bin", "decoder"),
-        .unet_head = get_model("sd_unet_head.bin", "unet_middle")
+        .unet_outputs = get_model("sd_unet_outputs"),
+        .unet_inputs = get_model("sd_unet_inputs"),
+        .cond_model = get_model("cond_model"),
+        .unet_middle = get_model("sd_unet_middle"),
+        .decoder = get_model("decoder"),
+        .unet_head = get_model("sd_unet_head")
     });
+#endif
 
     info("All models loaded!");
 }

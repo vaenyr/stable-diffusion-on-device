@@ -31,6 +31,8 @@ public:
     Context(std::string const& models_dir, unsigned int latent_channels, unsigned int latent_spatial, unsigned int upscale_factor, LogLevel log_level);
     virtual ~Context();
 
+    void init_mt(unsigned int steps);
+
     void initialize_qnn();
     void load_models();
     void load_tokenizer();

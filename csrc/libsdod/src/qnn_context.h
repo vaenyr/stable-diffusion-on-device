@@ -10,6 +10,7 @@
 #include <memory>
 #include <optional>
 #include <functional>
+#include <mutex>
 
 #include <QnnInterface.h>
 #include <System/QnnSystemInterface.h>
@@ -230,11 +231,13 @@ public:
 
 private:
     std::shared_ptr<QnnApi> api;
+    std::mutex api_mutex;
 
     qnn_hnd<Qnn_BackendHandle_t> backend_hnd;
     qnn_hnd<Qnn_DeviceHandle_t> device_hnd;
 
     std::list<QnnContext> ctx;
+    std::mutex ctx_mutex;
 
     std::optional<QnnHtpDevice_PerfInfrastructure_t> _htp_perf_infra;
     std::optional<uint32_t> _htp_power_config_id;

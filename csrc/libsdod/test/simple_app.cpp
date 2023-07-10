@@ -7,7 +7,7 @@ int main() {
 #ifdef __ANDROID__
     int status = libsdod_setup(&ctx, "/data/local/tmp/libsdod", 4, 64, 8, 20, LIBSDOD_LOG_INFO);
 #else
-    int status = libsdod_setup(&ctx, "../../../../dlc", 4, 64, 8, 20, LIBSDOD_LOG_INFO);
+    int status = libsdod_setup(&ctx, "../../../../dlc", 4, 64, 8, 20, LIBSDOD_LOG_DEBUG);
 #endif
     if (status) {
         std::cout << "Initialization error: " << libsdod_get_error_description(status) << "; " << libsdod_get_last_error_extra_info(status, ctx) << std::endl;

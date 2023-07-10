@@ -868,7 +868,13 @@ graph_refs QnnBackend::load_context(std::string const& context_blob) {
     debug("Mapped {} bytes from file: {}", buffer.size, context_blob);
 #endif
 
-    auto&& context_hnd = api->create_context(buffer, backend_hnd.get(), device_hnd.get(), nullptr);
+    qnn_hnd<Qnn_BackendHandle_t> context_hnd;
+    {
+        auto&& _api_guard = std::lock_guard<std::mutex>{ api_mutex };
+        (void)_api_guard;
+        context_hnd = api->create_context(buffer, backend_hnd.get(), device_hnd.get(), nullptr);
+
+    }
     debug("Context handler created");
 
     std::list<QnnGraph> graphs;
@@ -884,7 +890,7 @@ graph_refs QnnBackend::load_context(std::string const& context_blob) {
         num_graphs = bin_info.contextBinaryInfoV1.numGraphs;
     } else if (bin_info.version == QNN_SYSTEM_CONTEXT_BINARY_INFO_VERSION_2) {
         graphs_info = bin_info.contextBinaryInfoV2.graphs;
-        num_graphs = bin_info.contextBinaryInfoV1.numGraphs;
+        num_graphs = bin_info.contextBinaryInfoV2.numGraphs;
     } else
         throw libsdod_exception(ErrorCode::INVALID_ARGUMENT, format("Unexpected binary info version: {}", bin_info.version), __func__, __FILE__, STR(__LINE__));
 
@@ -899,6 +905,8 @@ graph_refs QnnBackend::load_context(std::string const& context_blob) {
             throw libsdod_exception(ErrorCode::INVALID_ARGUMENT, format("Unexpected graph info version: {}", graph_info.version), __func__, __FILE__, STR(__LINE__));
     }
 
+    auto&& _guard = std::lock_guard<std::mutex>{ ctx_mutex };
+    (void)_guard;
     ctx.emplace_back(QnnContext{ std::move(context_hnd), std::move(graphs) });
     return ret;
 }
