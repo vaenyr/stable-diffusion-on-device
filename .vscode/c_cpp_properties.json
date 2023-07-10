@@ -4,7 +4,8 @@
             "name": "Linux",
             "includePath": [
                 "${workspaceFolder}/csrc/**",
-                "${env:QNN_SDK_ROOT}/include"
+                "${env:QNN_SDK_ROOT}/include",
+                "${env:QNN_SDK_ROOT}/target/x86_64-linux-clang/share/converter/jni"
             ],
             "defines": [
                 "LIBSDOD_API=\"\""

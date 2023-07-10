@@ -36,6 +36,7 @@ enum libsdod_log_level {
    upscale_factor - upscaling factor for the decoder, SD1.5 uses 8
    steps - number of denoising steps to perform when generating an image, can be later overwritten with libsdod_set_steps
    log_level - logging level, can be later overwritten with libsdod_set_log_level
+   use_htp - whether to use HTP or GPU
 
    Returns 0 if successful, otherwise an error code is returned.
    If successful, *context will be pointer to a prepared context that should be passed to other functions and cleaned when no longer needed, see release.
@@ -43,7 +44,7 @@ enum libsdod_log_level {
    by a call to ``release``, it should also be used when querying for error details; it should not be, however, used to generate images.
    If a method fails before a context object is created, *context will be nullptr.
 */
-LIBSDOD_API int libsdod_setup(void** context, const char* models_dir, unsigned int latent_channels, unsigned int latent_spatial, unsigned int upscale_factor, unsigned int steps, unsigned int log_level);
+LIBSDOD_API int libsdod_setup(void** context, const char* models_dir, unsigned int latent_channels, unsigned int latent_spatial, unsigned int upscale_factor, unsigned int steps, unsigned int log_level, int use_htp);
 
 
 /* Changes the number of denoising steps performed when generating images using the provided context.

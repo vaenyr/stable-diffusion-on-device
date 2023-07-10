@@ -17,18 +17,18 @@ namespace libsdod {
 
 
 struct StableDiffusionModel {
+    graph_ref unet_head;
     graph_ref unet_outputs;
     graph_ref unet_inputs;
     graph_ref cond_model;
     graph_ref unet_middle;
     graph_ref decoder;
-    graph_ref unet_head;
 };
 
 
 class Context {
 public:
-    Context(std::string const& models_dir, unsigned int latent_channels, unsigned int latent_spatial, unsigned int upscale_factor, LogLevel log_level);
+    Context(std::string const& models_dir, unsigned int latent_channels, unsigned int latent_spatial, unsigned int upscale_factor, LogLevel log_level, bool use_htp=true);
     virtual ~Context();
 
     void init_mt(unsigned int steps);
@@ -58,6 +58,7 @@ private:
     unsigned int latent_channels;
     unsigned int latent_spatial;
     unsigned int upscale_factor;
+    bool use_htp;
 
     bool _failed_and_gave_up = false;
     bool _qnn_initialized = false;

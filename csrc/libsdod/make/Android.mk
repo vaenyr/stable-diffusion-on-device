@@ -23,6 +23,7 @@ endif
 PACKAGE_C_INCLUDES += -I $(LOCAL_PATH)/../src/
 PACKAGE_C_INCLUDES += -I $(LOCAL_PATH)/../api/
 PACKAGE_C_INCLUDES += -I $(QNN_SDK_ROOT)/include
+PACKAGE_C_INCLUDES += -I $(QNN_SDK_ROOT)/target/x86_64-linux-clang/share/converter/jni
 
 #========================== Define OpPackage Library Build Variables =============================================
 include $(CLEAR_VARS)

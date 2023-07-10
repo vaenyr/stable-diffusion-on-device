@@ -63,7 +63,7 @@ ErrorCode _error(ErrorCode code, Context* c, T&& message, const char* func, cons
     (void)_logger_scope
 
 
-static ErrorCode setup_impl(void** context, const char* models_dir, unsigned int latent_channels, unsigned int latent_spatial, unsigned int upscale_factor, unsigned int steps, unsigned int log_level) {
+static ErrorCode setup_impl(void** context, const char* models_dir, unsigned int latent_channels, unsigned int latent_spatial, unsigned int upscale_factor, unsigned int steps, unsigned int log_level, bool use_htp) {
     Context* cptr = nullptr;
     if (context == nullptr)
         return ERROR(ErrorCode::INVALID_ARGUMENT, "Context argument should not be nullptr!");
@@ -79,7 +79,7 @@ static ErrorCode setup_impl(void** context, const char* models_dir, unsigned int
         return ERROR(ErrorCode::FAILED_ALLOCATION, "Could not create a new CAPI_Context_Handler object");
 
     hnd->ref_count += 1;
-    hnd->cptr = new (std::nothrow) Context(models_dir, latent_channels, latent_spatial, upscale_factor, static_cast<LogLevel>(log_level));
+    hnd->cptr = new (std::nothrow) Context(models_dir, latent_channels, latent_spatial, upscale_factor, static_cast<LogLevel>(log_level), use_htp);
     if (hnd->cptr == nullptr)
         return ERROR(ErrorCode::FAILED_ALLOCATION, "COuld not create a new Context object");
 
@@ -89,7 +89,7 @@ static ErrorCode setup_impl(void** context, const char* models_dir, unsigned int
     (void)_logger_scope;
 
     try {
-#ifndef NOTHREADS
+#if !defined(NOTHREADS) && !defined(LIBSDOD_DEBUG)
         cptr->init_mt(steps);
 #else
         cptr->initialize_qnn();
@@ -212,8 +212,8 @@ static const char* get_last_error_extra_info_impl(int errorcode, void* context) 
 
 extern "C" {
 
-LIBSDOD_API int libsdod_setup(void** context, const char* models_dir, unsigned int latent_channels, unsigned int latent_spatial, unsigned int upscale_factor, unsigned int steps, unsigned int log_level) {
-    return static_cast<int>(libsdod::setup_impl(context, models_dir, latent_channels, latent_spatial, upscale_factor, steps, log_level));
+LIBSDOD_API int libsdod_setup(void** context, const char* models_dir, unsigned int latent_channels, unsigned int latent_spatial, unsigned int upscale_factor, unsigned int steps, unsigned int log_level, int use_htp) {
+    return static_cast<int>(libsdod::setup_impl(context, models_dir, latent_channels, latent_spatial, upscale_factor, steps, log_level, static_cast<bool>(use_htp)));
 }
 
 LIBSDOD_API int libsdod_set_steps(void* context, unsigned int steps) {

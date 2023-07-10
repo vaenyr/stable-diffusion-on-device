@@ -272,19 +272,13 @@ QnnApi::QnnApi(QnnBackendType backend) : backend(backend) {
                         QNN_SYSTEM_API_VERSION_MINOR <=  providers[i]->systemApiVersion.minor) {
                         found = true;
                         system_interface = providers[i]->QNN_SYSTEM_INTERFACE_VER_NAME;
+                        has_system_interface = true;
                         break;
                     }
                 }
 
                 if (!found) {
                     info("Warning: could not find a suitable system interface provider, some functions might fail");
-                } else {
-                    QnnSystemContext_Handle_t _system_hnd = nullptr;
-                    if (QNN_SUCCESS != system_interface.systemContextCreate(&_system_hnd)) {
-                        info("Warning: could not create QNN system context! Some functions might fail");
-                    } else {
-                        system_hnd = qnn_hnd<QnnSystemContext_Handle_t>(_system_hnd, system_interface.systemContextFree);
-                    }
                 }
             }
         }
@@ -327,6 +321,9 @@ qnn_hnd<Qnn_BackendHandle_t> QnnApi::create_backend(const QnnBackend_Config_t** 
 
 
 qnn_hnd<Qnn_DeviceHandle_t> QnnApi::create_device(const QnnDevice_Config_t** cfg) const {
+    if (interface.deviceCreate == nullptr || backend == QnnBackendType::GPU)
+        return nullptr;
+
     Qnn_DeviceHandle_t ret = nullptr;
     _generic_qnn_api_call(interface.deviceCreate, "deviceCreate", __func__, __FILE__, STR(__LINE__), log_hnd.get(), cfg, &ret);
     return qnn_hnd<Qnn_DeviceHandle_t>(ret, interface.deviceFree);
@@ -359,13 +356,23 @@ void QnnApi::register_op_package(std::string const& package_path, std::string co
 }
 
 
-QnnSystemContext_BinaryInfo_t const& QnnApi::get_binary_info(std::vector<unsigned char>& buffer) const {
-    if (!system_hnd)
-        throw libsdod_exception(ErrorCode::INTERNAL_ERROR, "Attempted to get binary info of a serialized context but system context has not been created - see previous warnings", __func__, __FILE__, STR(__LINE__));
+qnn_hnd<QnnSystemContext_Handle_t> QnnApi::create_system_context() {
+    if (!has_system_interface)
+        throw libsdod_exception(ErrorCode::RUNTIME_ERROR, "Cannot create system context, missing system interface", __func__, __FILE__, STR(__LINE__));
+
+    QnnSystemContext_Handle_t _system_hnd = nullptr;
+    _generic_qnn_api_call(system_interface.systemContextCreate, "systemContextCreate", __func__, __FILE__, STR(__LINE__), &_system_hnd);
+    return qnn_hnd<QnnSystemContext_Handle_t>(_system_hnd, system_interface.systemContextFree);
+}
+
+
+QnnSystemContext_BinaryInfo_t const& QnnApi::get_binary_info(QnnSystemContext_Handle_t ctx, std::vector<unsigned char>& buffer) const {
+    if (!has_system_interface)
+        throw libsdod_exception(ErrorCode::INTERNAL_ERROR, "Attempted to get binary info of a serialized context but system interface has not been retrieved - see previous warnings", __func__, __FILE__, STR(__LINE__));
 
     const QnnSystemContext_BinaryInfo_t* binary_info = nullptr;
     Qnn_ContextBinarySize_t binary_info_size = 0;
-    _generic_qnn_api_call(system_interface.systemContextGetBinaryInfo, "systemContextGetBinaryInfo", __func__, __FILE__, STR(__LINE__), system_hnd.get(), buffer.data(), buffer.size(), &binary_info, &binary_info_size);
+    _generic_qnn_api_call(system_interface.systemContextGetBinaryInfo, "systemContextGetBinaryInfo", __func__, __FILE__, STR(__LINE__), ctx, buffer.data(), buffer.size(), &binary_info, &binary_info_size);
     if (!binary_info)
         throw libsdod_exception(ErrorCode::INVALID_ARGUMENT, "Returned binary info is a nullptr!", __func__, __FILE__, STR(__LINE__));
 
@@ -373,13 +380,13 @@ QnnSystemContext_BinaryInfo_t const& QnnApi::get_binary_info(std::vector<unsigne
 }
 
 
-QnnSystemContext_BinaryInfo_t const& QnnApi::get_binary_info(mmap_t& buffer) const {
-    if (!system_hnd)
-        throw libsdod_exception(ErrorCode::INTERNAL_ERROR, "Attempted to get binary info of a serialized context but system context has not been created - see previous warnings", __func__, __FILE__, STR(__LINE__));
+QnnSystemContext_BinaryInfo_t const& QnnApi::get_binary_info(QnnSystemContext_Handle_t ctx, mmap_t& buffer) const {
+    if (!has_system_interface)
+        throw libsdod_exception(ErrorCode::INTERNAL_ERROR, "Attempted to get binary info of a serialized context but system interface has not been retrieved - see previous warnings", __func__, __FILE__, STR(__LINE__));
 
     const QnnSystemContext_BinaryInfo_t* binary_info = nullptr;
     Qnn_ContextBinarySize_t binary_info_size = 0;
-    _generic_qnn_api_call(system_interface.systemContextGetBinaryInfo, "systemContextGetBinaryInfo", __func__, __FILE__, STR(__LINE__), system_hnd.get(), buffer.data, buffer.size, &binary_info, &binary_info_size);
+    _generic_qnn_api_call(system_interface.systemContextGetBinaryInfo, "systemContextGetBinaryInfo", __func__, __FILE__, STR(__LINE__), ctx, buffer.data, buffer.size, &binary_info, &binary_info_size);
     if (!binary_info)
         throw libsdod_exception(ErrorCode::INVALID_ARGUMENT, "Returned binary info is a nullptr!", __func__, __FILE__, STR(__LINE__));
 
@@ -391,6 +398,11 @@ Qnn_GraphHandle_t QnnApi::retrieve_graph(Qnn_ContextHandle_t context, const char
     Qnn_GraphHandle_t ret = nullptr;
     _generic_qnn_api_call(interface.graphRetrieve, "graphRetrieve", __func__, __FILE__, STR(__LINE__), context, graph_name, &ret);
     return ret; // graph handles do not need to be freed, so no need to wrap them in shared_ptr
+}
+
+
+void QnnApi::finalize_graph(Qnn_GraphHandle_t hnd) const {
+    _generic_qnn_api_call(interface.graphFinalize, "graphFinalize", __func__, __FILE__, STR(__LINE__), hnd, nullptr, nullptr);
 }
 
 
@@ -583,7 +595,7 @@ std::string QnnTensor::get_slot_name() const { return format("{}:{}", slot.graph
 
 
 QnnGraph::QnnGraph(QnnGraph::CtorToken&& token)
-    : orig_name(token.orig_name), inputs(std::span(token.inputs, token.num_inputs)), outputs(std::span(token.outputs, token.num_outputs)), 
+    : orig_name(token.orig_name), inputs(token.inputs), outputs(token.outputs), 
       graph(token.graph), ctx(std::move(token.ctx)), api(std::move(token.api)), name(token.orig_name) {
     if (is_enabled(LogLevel::DEBUG)) {
         debug("New graph: {} @ {}", orig_name, this);
@@ -607,10 +619,7 @@ QnnGraph::QnnGraph(QnnGraph::CtorToken&& token)
 QnnTensor QnnGraph::allocate_input(unsigned int idx, unsigned batch, bool activate) {
     if (idx >= inputs.size())
         throw libsdod_exception(ErrorCode::INTERNAL_ERROR, format("Input index too large: {}", idx), __func__, __FILE__, STR(__LINE__));
-    auto&& _ctx = ctx.lock();
-    if (!_ctx)
-        throw libsdod_exception(ErrorCode::INTERNAL_ERROR, "Trying to allocate memory while context has already been deleted!", __func__, __FILE__, STR(__LINE__));
-    QnnTensor ret{ *api, _ctx.get(), input_slots[idx], batch };
+    QnnTensor ret{ *api, ctx.get(), input_slots[idx], batch };
     if (activate)
         ret.activate();
     return ret;
@@ -630,10 +639,7 @@ QnnTensor QnnGraph::attach_input(unsigned int idx, QnnTensor const& t, bool acti
 QnnTensor QnnGraph::allocate_output(unsigned int idx, unsigned batch, bool activate) {
     if (idx >= outputs.size())
         throw libsdod_exception(ErrorCode::INTERNAL_ERROR, format("Output index too large: {}", idx), __func__, __FILE__, STR(__LINE__));
-    auto&& _ctx = ctx.lock();
-    if (!_ctx)
-        throw libsdod_exception(ErrorCode::INTERNAL_ERROR, "Trying to allocate memory while context has already been deleted!", __func__, __FILE__, STR(__LINE__));
-    QnnTensor ret{ *api, _ctx.get(), output_slots[idx], batch };
+    QnnTensor ret{ *api, ctx.get(), output_slots[idx], batch };
     if (activate)
         ret.activate();
     return ret;
@@ -700,7 +706,29 @@ void QnnGraph::execute_async(std::function<void(void*, Qnn_NotifyStatus_t)> noti
 }
 
 
-QnnContext::QnnContext(qnn_hnd<Qnn_ContextHandle_t> ctx, std::list<QnnGraph>&& graphs) : ctx(ctx), graphs(std::move(graphs)) {
+QnnContext::QnnContext(qnn_hnd<Qnn_ContextHandle_t> ctx, std::shared_ptr<void> dl, std::function<void()> free_fn)
+    : ctx(ctx), graphs(), dl(std::move(dl)), free_fn(std::move(free_fn)) {
+}
+
+
+QnnContext::~QnnContext() {
+    if (free_fn)
+        free_fn();
+}
+
+
+graph_ref QnnContext::add_graph(std::shared_ptr<QnnContext> const& self, std::shared_ptr<QnnApi> const& api, Qnn_GraphHandle_t hnd, const char* name, std::span<Qnn_Tensor_t> inputs, std::span<Qnn_Tensor_t> outputs) {
+    if (self.get() != this)
+        throw libsdod_exception(ErrorCode::INVALID_ARGUMENT, "self should match this", __func__, __FILE__, STR(__LINE__));
+
+    return graphs.emplace_back(QnnGraph::CtorToken{
+        .graph = hnd,
+        .ctx = self,
+        .api = api,
+        .orig_name = name,
+        .inputs = inputs,
+        .outputs = outputs
+    });
 }
 
 
@@ -869,19 +897,21 @@ graph_refs QnnBackend::load_context(std::string const& context_blob) {
 #endif
 
     qnn_hnd<Qnn_BackendHandle_t> context_hnd;
+    qnn_hnd<QnnSystemContext_Handle_t> system_hnd;
     {
         auto&& _api_guard = std::lock_guard<std::mutex>{ api_mutex };
         (void)_api_guard;
         context_hnd = api->create_context(buffer, backend_hnd.get(), device_hnd.get(), nullptr);
+        system_hnd = api->create_system_context();
 
     }
     debug("Context handler created");
 
-    std::list<QnnGraph> graphs;
+    std::shared_ptr<QnnContext> ctx{ new QnnContext(context_hnd, system_hnd, nullptr) };
     graph_refs ret;
 
     debug("Investigating context binary info...");
-    auto&& bin_info = api->get_binary_info(buffer);
+    auto&& bin_info = api->get_binary_info(system_hnd.get(), buffer);
 
     QnnSystemContext_GraphInfo_t* graphs_info = nullptr;
     uint32_t num_graphs = 0;
@@ -899,21 +929,70 @@ graph_refs QnnBackend::load_context(std::string const& context_blob) {
         auto&& graph_info = graphs_info[i];
         if (graph_info.version == QNN_SYSTEM_CONTEXT_GRAPH_INFO_VERSION_1) {
             auto&& graph_hnd = api->retrieve_graph(context_hnd.get(), graph_info.graphInfoV1.graphName);
-            graphs.emplace_back(QnnGraph::CtorToken{ context_hnd, api, graph_info.graphInfoV1.graphName, graph_info.graphInfoV1.graphInputs, graph_info.graphInfoV1.numGraphInputs, graph_info.graphInfoV1.graphOutputs, graph_info.graphInfoV1.numGraphOutputs, graph_hnd });
-            ret.push_back(graphs.back());
+            ret.emplace_back(ctx->add_graph(
+                ctx,
+                api,
+                graph_hnd,
+                graph_info.graphInfoV1.graphName,
+                std::span(graph_info.graphInfoV1.graphInputs, graph_info.graphInfoV1.numGraphInputs),
+                std::span(graph_info.graphInfoV1.graphOutputs, graph_info.graphInfoV1.numGraphOutputs)
+            ));
         } else
             throw libsdod_exception(ErrorCode::INVALID_ARGUMENT, format("Unexpected graph info version: {}", graph_info.version), __func__, __FILE__, STR(__LINE__));
     }
 
-    auto&& _guard = std::lock_guard<std::mutex>{ ctx_mutex };
-    (void)_guard;
-    ctx.emplace_back(QnnContext{ std::move(context_hnd), std::move(graphs) });
     return ret;
 }
 
 
 graph_refs QnnBackend::load_model(std::string const& model_so) {
-    throw libsdod_exception(ErrorCode::INTERNAL_ERROR, "Not implemented", __func__, __FILE__, STR(__LINE__));
+    auto dl = std::shared_ptr<void>(dlopen(model_so.c_str(), RTLD_NOW | RTLD_LOCAL), _free_dl);
+    if (!dl)
+        throw libsdod_exception(ErrorCode::RUNTIME_ERROR, "Could not load model library: " + model_so, __func__, __FILE__, STR(__LINE__));
+
+    auto&& compose_fn = resolve_symbol<ComposeGraphsFnHandleType_t>(dl.get(), "QnnModel_composeGraphs");
+    auto&& free_fn = resolve_symbol<FreeGraphInfoFnHandleType_t>(dl.get(), "QnnModel_freeGraphsInfo");
+
+    qnn_hnd<Qnn_BackendHandle_t> context_hnd;
+    {
+        auto&& _api_guard = std::lock_guard<std::mutex>{ api_mutex };
+        (void)_api_guard;
+        context_hnd = api->create_context(backend_hnd.get(), device_hnd.get(), nullptr);
+    }
+
+    const qnn_wrapper_api::GraphConfigInfo_t** graph_config_infos = nullptr; //TODO: do we really need the graph configs?
+    uint32_t graph_config_infos_count = 0;
+    qnn_wrapper_api::GraphInfo_t** graph_infos = nullptr;
+    uint32_t graph_infos_count = 0;
+
+    debug("Calling graph compose function from library: {}", model_so);
+    compose_fn(backend_hnd.get(), api->get_interface(), context_hnd.get(), graph_config_infos, graph_config_infos_count, &graph_infos, &graph_infos_count, false, qnn_log_callback, QNN_LOG_LEVEL_DEBUG);
+
+    std::shared_ptr<QnnContext> ctx{ new QnnContext(context_hnd, dl, [free_fn, graph_infos, graph_infos_count]() mutable { if (graph_infos) free_fn(&graph_infos, graph_infos_count); }) };
+    graph_refs ret;
+
+    for (auto i : range(graph_infos_count)) {
+        auto&& graph_info = (*graph_infos)[i];
+        api->finalize_graph(graph_info.graph);
+        ret.emplace_back(ctx->add_graph(
+            ctx,
+            api,
+            graph_info.graph,
+            graph_info.graphName,
+            std::span(graph_info.inputTensors, graph_info.numInputTensors),
+            std::span(graph_info.outputTensors, graph_info.numOutputTensors)
+        ));
+    }
+
+    return ret;
+}
+
+
+graph_refs QnnBackend::load_graphs(std::string const& file, bool is_cached) {
+    if (is_cached)
+        return load_context(file);
+    else
+        return load_model(file);
 }
 
 

@@ -11,8 +11,8 @@
 using namespace libsdod;
 
 
-Context::Context(std::string const& models_dir, unsigned int latent_channels, unsigned int latent_spatial, unsigned int upscale_factor, LogLevel log_level)
-    : models_dir(models_dir), latent_channels(latent_channels), latent_spatial(latent_spatial), upscale_factor(upscale_factor),
+Context::Context(std::string const& models_dir, unsigned int latent_channels, unsigned int latent_spatial, unsigned int upscale_factor, LogLevel log_level, bool use_htp)
+    : models_dir(models_dir), latent_channels(latent_channels), latent_spatial(latent_spatial), upscale_factor(upscale_factor), use_htp(use_htp),
     _random_gen{ std::random_device{}() }, _normal{ 0, 1 } {
     _error_table = allocate_error_table();
     _logger.set_level(log_level);
@@ -67,7 +67,7 @@ void Context::initialize_qnn() {
     if (_qnn_initialized)
         return;
 
-    _qnn = std::shared_ptr<QnnBackend>(new QnnBackend(QnnBackendType::HTP));
+    _qnn = std::shared_ptr<QnnBackend>(new QnnBackend(use_htp ? QnnBackendType::HTP : QnnBackendType::GPU));
     _qnn_initialized = true;
 }
 
@@ -80,7 +80,7 @@ void Context::load_models() {
     if (_model)
         return;
 
-#ifndef NOTHREADS
+#if !defined(NOTHREADS) && !defined(LIBSDOD_DEBUG)
     std::map<std::string, QnnGraph*> _graphs;
     std::mutex _graphs_mutex;
     auto&& _graph_names = std::array{ "sd_unet_outputs", "sd_unet_inputs", "cond_model", "sd_unet_middle", "decoder", "sd_unet_head" };
@@ -88,10 +88,16 @@ void Context::load_models() {
     auto&& get_model_async = [this, &_graphs, &_graphs_mutex](const char* name) {
         auto&& _log_guard = activate_logger();
         (void)_log_guard;
-        std::string filename = std::string(name) + ".bin";
+
+        std::string filename;
+        if (use_htp)
+            filename = std::string(name) + ".bin";
+        else
+            filename = std::string(name) + ".so";
+
         info("Attempting to load a model: {}", filename);
         auto&& path = models_dir + "/" + filename;
-        auto&& graphs = _qnn->load_context(path);
+        auto&& graphs = _qnn->load_graphs(path, use_htp);
         if (graphs.empty())
             throw libsdod_exception(ErrorCode::INVALID_ARGUMENT, format("Deserialized context {} does not contain any graphs!", path), "load_models", __FILE__, STR(__LINE__));
         if (graphs.size() > 1)
@@ -112,19 +118,24 @@ void Context::load_models() {
         t.join();
 
     _model.emplace(StableDiffusionModel{
+        .unet_head = *_graphs["sd_unet_head"],
         .unet_outputs = *_graphs["sd_unet_outputs"],
         .unet_inputs = *_graphs["sd_unet_inputs"],
         .cond_model = *_graphs["cond_model"],
         .unet_middle = *_graphs["sd_unet_middle"],
-        .decoder = *_graphs["decoder"],
-        .unet_head = *_graphs["sd_unet_head"]
+        .decoder = *_graphs["decoder"]
     });
 #else
     auto&& get_model = [this](const char* name) -> graph_ref {
-        std::string filename = std::string(name) + ".bin";
+        std::string filename;
+        if (use_htp)
+            filename = std::string(name) + ".bin";
+        else
+            filename = std::string(name) + ".qnn.so";
+
         info("Attempting to load a model: {}", filename);
         auto&& path = models_dir + "/" + filename;
-        auto&& graphs = _qnn->load_context(path);
+        auto&& graphs = _qnn->load_graphs(path, use_htp);
         if (graphs.empty())
             throw libsdod_exception(ErrorCode::INVALID_ARGUMENT, format("Deserialized context {} does not contain any graphs!", path), "load_models", __FILE__, STR(__LINE__));
         if (graphs.size() > 1)
@@ -135,12 +146,12 @@ void Context::load_models() {
     };
 
     _model.emplace(StableDiffusionModel{
+        .unet_head = get_model("sd_unet_head"),
         .unet_outputs = get_model("sd_unet_outputs"),
         .unet_inputs = get_model("sd_unet_inputs"),
         .cond_model = get_model("cond_model"),
         .unet_middle = get_model("sd_unet_middle"),
-        .decoder = get_model("decoder"),
-        .unet_head = get_model("sd_unet_head")
+        .decoder = get_model("decoder")
     });
 #endif
 

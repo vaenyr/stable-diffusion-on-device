@@ -13,6 +13,7 @@
 #include <mutex>
 
 #include <QnnInterface.h>
+#include <QnnWrapperUtils.hpp>
 #include <System/QnnSystemInterface.h>
 #include <HTP/QnnHtpDevice.h>
 
@@ -47,6 +48,11 @@ typedef void (*RpcMemFreeFn_t)(void*);
 typedef int (*RpcMemToFdFn_t)(void*);
 
 
+// Graph Related Function Handle Types
+typedef qnn_wrapper_api::ModelError_t (*ComposeGraphsFnHandleType_t)(Qnn_BackendHandle_t, QNN_INTERFACE_VER_TYPE, Qnn_ContextHandle_t, const qnn_wrapper_api::GraphConfigInfo_t **, const uint32_t, qnn_wrapper_api::GraphInfo_t ***, uint32_t *, bool, QnnLog_Callback_t, QnnLog_Level_t);
+typedef Qnn_ErrorHandle_t (*FreeGraphInfoFnHandleType_t)(qnn_wrapper_api::GraphInfo_t***, uint32_t);
+
+
 enum class QnnBackendType : int {
     CPU,
     GPU,
@@ -62,6 +68,7 @@ public:
     virtual ~QnnApi();
 
     auto get_backend_type() const { return backend; }
+    auto get_interface() const { return interface; }
 
     QnnDevice_Infrastructure_t get_device_infrastructure() const;
 
@@ -73,9 +80,11 @@ public:
 
     void register_op_package(std::string const& package_path, std::string const& package_interface_provider) const;
 
-    QnnSystemContext_BinaryInfo_t const& get_binary_info(std::vector<unsigned char>& buffer) const;
-    QnnSystemContext_BinaryInfo_t const& get_binary_info(mmap_t& buffer) const;
+    qnn_hnd<QnnSystemContext_Handle_t> create_system_context();
+    QnnSystemContext_BinaryInfo_t const& get_binary_info(QnnSystemContext_Handle_t ctx, std::vector<unsigned char>& buffer) const;
+    QnnSystemContext_BinaryInfo_t const& get_binary_info(QnnSystemContext_Handle_t ctx, mmap_t& buffer) const;
     Qnn_GraphHandle_t retrieve_graph(Qnn_ContextHandle_t context, const char* graph_name) const;
+    void finalize_graph(Qnn_GraphHandle_t hnd) const;
 
     void set_graph_config(Qnn_GraphHandle_t graph, const QnnGraph_Config_t** cfg) const;
 
@@ -95,7 +104,7 @@ private:
     std::shared_ptr<void> system_dl;
     std::shared_ptr<void> cdsp_dl ;
     qnn_hnd<Qnn_LogHandle_t> log_hnd;
-    qnn_hnd<QnnSystemContext_Handle_t> system_hnd;
+    bool has_system_interface = false;
 
     QNN_INTERFACE_VER_TYPE interface;
     QNN_SYSTEM_INTERFACE_VER_TYPE system_interface;
@@ -154,17 +163,15 @@ private:
 
 
 class QnnGraph {
-    friend class QnnBackend;
+    friend class QnnContext;
 private:
     struct CtorToken {
-        qnn_hnd<Qnn_ContextHandle_t> ctx;
+        Qnn_GraphHandle_t graph;
+        std::shared_ptr<QnnContext> ctx;
         std::shared_ptr<QnnApi> api;
         const char* orig_name;
-        Qnn_Tensor_t* inputs;
-        unsigned int num_inputs;
-        Qnn_Tensor_t* outputs;
-        unsigned int num_outputs;
-        Qnn_GraphHandle_t graph;
+        std::span<Qnn_Tensor_t> inputs;
+        std::span<Qnn_Tensor_t> outputs;
     };
 
 public:
@@ -196,7 +203,7 @@ private:
     graph_slots output_slots;
 
     Qnn_GraphHandle_t graph;
-    qnn_hnd<Qnn_ContextHandle_t>::weak_type ctx;
+    qnn_hnd<Qnn_ContextHandle_t> ctx;
     std::shared_ptr<QnnApi> api;
 
     std::string name;
@@ -208,12 +215,17 @@ class QnnContext {
 public:
     QnnContext(QnnContext const& other) = delete;
     QnnContext(QnnContext&& other) = default;
+    ~QnnContext();
+
+    graph_ref add_graph(std::shared_ptr<QnnContext> const& self, std::shared_ptr<QnnApi> const& api, Qnn_GraphHandle_t hnd, const char* name, std::span<Qnn_Tensor_t> inputs, std::span<Qnn_Tensor_t> outputs);
 
 private:
-    QnnContext(qnn_hnd<Qnn_ContextHandle_t> ctx, std::list<QnnGraph>&& graphs);
+    QnnContext(qnn_hnd<Qnn_ContextHandle_t> ctx, std::shared_ptr<void> dl = nullptr, std::function<void()> free_fn = nullptr);
 
     qnn_hnd<Qnn_ContextHandle_t> ctx;
     std::list<QnnGraph> graphs;
+    std::shared_ptr<void> dl;
+    std::function<void()> free_fn;
 };
 
 
@@ -226,6 +238,8 @@ public:
     graph_refs load_context(std::string const& context_blob);
     graph_refs load_model(std::string const& model_so);
 
+    graph_refs load_graphs(std::string const& file, bool is_cached);
+
     void start_burst();
     void end_burst();
 
@@ -235,9 +249,6 @@ private:
 
     qnn_hnd<Qnn_BackendHandle_t> backend_hnd;
     qnn_hnd<Qnn_DeviceHandle_t> device_hnd;
-
-    std::list<QnnContext> ctx;
-    std::mutex ctx_mutex;
 
     std::optional<QnnHtpDevice_PerfInfrastructure_t> _htp_perf_infra;
     std::optional<uint32_t> _htp_power_config_id;

@@ -11,8 +11,8 @@ APP_STL      := c++_shared
 APP_PLATFORM := android-21
 
 ifdef LIBSDOD_DEBUG
-APP_CPPFLAGS += -std=c++20 -O3 -Wall -Werror -fexceptions -fvisibility=hidden -DLIBSDOD_API="__attribute__((visibility(\"default\")))"
+APP_CPPFLAGS += -std=c++20 -O0 -g -DLIBSDOD_DEBUG=1 -Wall -Werror -fexceptions
 else
-APP_CPPFLAGS += -std=c++20 -O0 -g -Wall -Werror -fexceptions
+APP_CPPFLAGS += -std=c++20 -O3 -Wall -Werror -fexceptions -fvisibility=hidden -DLIBSDOD_API="__attribute__((visibility(\"default\")))"
 endif
 APP_LDFLAGS  += -lc -lm -ldl -llog

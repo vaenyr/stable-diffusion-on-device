@@ -19,8 +19,11 @@ parser.add_argument('--path', type=str, default=str(Path(__file__).absolute().pa
 parser.add_argument('--ts', action='store_true', help='Convert via torchscript rather than onnx. NOTE: Torchscript conversion still relies on ONNX files to determine input shapes, therefore both .pt and .onnx files are needed.')
 parser.add_argument('--group_norm', action='store_true')
 parser.add_argument('--qnn', action='store_true', help='Convert to QNN .so model libraries instead of SNPE .dlc')
+parser.add_argument('--fp16', action='store_true')
 
 args = parser.parse_args()
+if args.fp16 and not args.qnn:
+    raise ValueError('--fp16 is currently only supported for QNN')
 
 debug = args.debug
 regex = args.regex
@@ -74,9 +77,7 @@ def convert_onnx(onnx_file):
             extra_args['input_sizes'].append(sh)
 
     if args.group_norm:
-        # extra_args['extra_tool_args'] = ['--op_package_lib', 'sdod/csrc/GroupNormPackage/libs/x86_64-linux-clang/libGroupNormPackage.so:GroupNormPackageInterfaceProvider']
-        # extra_args['extra_tool_args'] = ['--op_package_config', 'config/group_norm.xml']
-        extra_args['udosGroupNormPackage'] = 'config/group_norm.json'
+        extra_args['extra_tool_args'] = ['--op_package_config', 'csrc/sdod_ops/config/group_norm.json']
 
     if args.force and target.exists():
         target.unlink()
@@ -98,7 +99,10 @@ def convert_onnx(onnx_file):
         print(f'Attempting {("ONNX" if not args.ts else "TorchScript") if args.qnn else "DLC (fp32)"} -> {"QNN model library conversion" if args.qnn else "DLC (int8) quantization"} for part:', part)
         try:
             if args.qnn:
-                cc.compile(source_file, model_type=source_type, output_file=target, quantize=8, generate_htp_context='sm8550', **extra_args)
+                if args.fp16:
+                    cc.compile(source_file, model_type=source_type, output_file=target, quantize=False, halfs=True, for_host=False, **extra_args)
+                else:
+                    cc.compile(source_file, model_type=source_type, output_file=target, quantize=8, generate_htp_context='sm8550', **extra_args)
             else:
                 cc.quantize(int_target, precision=8, output_file=target)
         except Exception:
