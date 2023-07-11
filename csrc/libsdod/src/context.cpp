@@ -119,6 +119,7 @@ void Context::load_models() {
             throw libsdod_exception(ErrorCode::INVALID_ARGUMENT, format("Deserialized context {} does not contain any graphs!", path), "load_models", __FILE__, STR(__LINE__));
         if (graphs.size() > 1)
             info("Warning: deserialized context {} contains more than 1 graph {}, only the first one will be used", path, graphs.size());
+
         graphs.front().set_name(name);
 
         auto&& _guard = std::lock_guard<std::mutex>{ _graphs_mutex };
@@ -158,9 +159,9 @@ void Context::load_models() {
             throw libsdod_exception(ErrorCode::INVALID_ARGUMENT, format("Deserialized context {} does not contain any graphs!", path), "load_models", __FILE__, STR(__LINE__));
         if (graphs.size() > 1)
             info("Warning: deserialized context {} contains more than 1 graph {}, only the first one will be used", path, graphs.size());
-        graphs.resize(1);
+
         graphs.front().set_name(name);
-        _qnn_graphs.splice(_qnn_graphs.end(), std::move(graphs));
+        _qnn_graphs.splice(_qnn_graphs.end(), std::move(graphs), graphs.begin());
         return _qnn_graphs.back();
     };
 
@@ -219,16 +220,13 @@ void Context::prepare_buffers() {
     other_tensors.emplace_back(_model->unet_outputs.attach_input(1, t.value()));
 
     // attach prompt
-    p_cond_inputs.emplace_back(_model->unet_inputs.attach_input(2, p_cond.value(), true, false)); // TODO: inputs seem to be transposed... for now ignore
-    p_cond_inputs.emplace_back(_model->unet_middle.attach_input(2, p_cond.value(), true, false));
-    p_cond_inputs.emplace_back(_model->unet_outputs.attach_input(2, p_cond.value(), true, false));
+    p_cond_inputs.emplace_back(_model->unet_inputs.attach_input(2, p_cond.value()));
+    p_cond_inputs.emplace_back(_model->unet_middle.attach_input(2, p_cond.value()));
+    p_cond_inputs.emplace_back(_model->unet_outputs.attach_input(2, p_cond.value()));
 
-    p_uncond_inputs.emplace_back(_model->unet_inputs.attach_input(2, p_uncond.value(), true, false)); // TODO: inputs seem to be transposed... for now ignore
-    p_uncond_inputs.emplace_back(_model->unet_middle.attach_input(2, p_uncond.value(), true, false));
-    p_uncond_inputs.emplace_back(_model->unet_outputs.attach_input(2, p_uncond.value(), true, false));
-
-    // cond model, other output (TODO: get rid of? seems unused)
-    other_tensors.emplace_back(_model->cond_model.allocate_output(1));
+    p_uncond_inputs.emplace_back(_model->unet_inputs.attach_input(2, p_uncond.value()));
+    p_uncond_inputs.emplace_back(_model->unet_middle.attach_input(2, p_uncond.value()));
+    p_uncond_inputs.emplace_back(_model->unet_outputs.attach_input(2, p_uncond.value()));
 
     // inputs <-> { middle, outputs }
     for (auto i : range(_model->unet_inputs.get_num_outputs())) {
