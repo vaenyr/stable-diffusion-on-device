@@ -79,6 +79,9 @@ def convert_onnx(onnx_file):
     if args.group_norm:
         extra_args['extra_tool_args'] = ['--op_package_config', 'csrc/sdod_ops/config/group_norm.json']
 
+    if 'sd_' in str(onnx_file) and 'head' not in str(onnx_file):
+        extra_args.setdefault('extra_tool_args', []).extend(['--input_layout', 'input_2', 'NTF'])
+
     if args.force and target.exists():
         target.unlink()
     if int_target is not None and args.force and int_target.exists():
