@@ -24,6 +24,23 @@ Context::Context(std::string const& models_dir, unsigned int latent_channels, un
 
 
 Context::~Context() {
+    tokens.reset();
+    p_cond.reset();
+    p_uncond.reset();
+    x.reset();
+    t.reset();
+    y.reset();
+    img.reset();
+    p_cond_inputs.clear();
+    p_uncond_inputs.clear();
+    other_tensors.clear();
+
+    _model.reset();
+    _tokenizer.reset();
+    _solver.reset();
+    _qnn_graphs.clear();
+
+    _qnn.reset();
 }
 
 
@@ -102,12 +119,13 @@ void Context::load_models() {
             throw libsdod_exception(ErrorCode::INVALID_ARGUMENT, format("Deserialized context {} does not contain any graphs!", path), "load_models", __FILE__, STR(__LINE__));
         if (graphs.size() > 1)
             info("Warning: deserialized context {} contains more than 1 graph {}, only the first one will be used", path, graphs.size());
-        auto&& ret = graphs.front();
-        ret.get().set_name(name);
+        graphs.front().set_name(name);
+
         auto&& _guard = std::lock_guard<std::mutex>{ _graphs_mutex };
         (void)_guard;
         info("Model {} loaded", name);
-        _graphs[name] = &ret.get();
+        _graphs[name] = &graphs.front();
+        _qnn_graphs.splice(_qnn_graphs.end(), std::move(graphs), graphs.begin());
     };
 
     std::list<std::thread> _loading_threads;
@@ -140,9 +158,10 @@ void Context::load_models() {
             throw libsdod_exception(ErrorCode::INVALID_ARGUMENT, format("Deserialized context {} does not contain any graphs!", path), "load_models", __FILE__, STR(__LINE__));
         if (graphs.size() > 1)
             info("Warning: deserialized context {} contains more than 1 graph {}, only the first one will be used", path, graphs.size());
-        auto&& ret = graphs.front();
-        ret.get().set_name(name);
-        return ret;
+        graphs.resize(1);
+        graphs.front().set_name(name);
+        _qnn_graphs.splice(_qnn_graphs.end(), std::move(graphs));
+        return _qnn_graphs.back();
     };
 
     _model.emplace(StableDiffusionModel{
@@ -320,14 +339,12 @@ void Context::generate(std::string const& prompt, float guidance, Buffer<unsigne
         info("{} took {}ms", name, diff.count());
     };
 
-    tokens_host = _tokenizer->tokenize(prompt);
-
     auto&& burst_scope_guard = scope_guard([this](){ _qnn->start_burst(); }, [this]() { _qnn->end_burst(); });
     (void)burst_scope_guard;
 
-    tokens->set_data(tokens_host);
-
     auto&& tick = std::chrono::high_resolution_clock::now();
+    tokens_host = _tokenizer->tokenize(prompt);
+    tokens->set_data(tokens_host);
     _model->cond_model.execute();
     auto&& tock = std::chrono::high_resolution_clock::now();
     _report_time("Conditioning", tick, tock);
@@ -372,21 +389,21 @@ void Context::generate(std::string const& prompt, float guidance, Buffer<unsigne
         _report_time("Single iteration", tick, tock);
     }
 
-    y->set_data(x_host);
 
     tick = std::chrono::high_resolution_clock::now();
+
+    y->set_data(x_host);
     _model->decoder.execute();
-    tock = std::chrono::high_resolution_clock::now();
-    _report_time("Decoding", tick, tock);
-
     img->get_data(img_host, 1 / 0.18215);
-
     auto* output_ptr = output.data_ptr();
     // decode img to uint8 pixels
     for (auto i : range(img_host.size())) {
         auto f = img_host[i];
         output_ptr[i] = static_cast<uint8_t>(255 * std::clamp(((f + 1) / 2), 0.0f, 1.0f));
     }
+
+    tock = std::chrono::high_resolution_clock::now();
+    _report_time("Decoding", tick, tock);
 
     info("Image successfully generated!");
     auto&& end = std::chrono::high_resolution_clock::now();

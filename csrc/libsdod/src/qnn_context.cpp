@@ -619,7 +619,7 @@ QnnGraph::QnnGraph(QnnGraph::CtorToken&& token)
 QnnTensor QnnGraph::allocate_input(unsigned int idx, unsigned batch, bool activate) {
     if (idx >= inputs.size())
         throw libsdod_exception(ErrorCode::INTERNAL_ERROR, format("Input index too large: {}", idx), __func__, __FILE__, STR(__LINE__));
-    QnnTensor ret{ *api, ctx.get(), input_slots[idx], batch };
+    QnnTensor ret{ *api, ctx->get_handle(), input_slots[idx], batch };
     if (activate)
         ret.activate();
     return ret;
@@ -639,7 +639,7 @@ QnnTensor QnnGraph::attach_input(unsigned int idx, QnnTensor const& t, bool acti
 QnnTensor QnnGraph::allocate_output(unsigned int idx, unsigned batch, bool activate) {
     if (idx >= outputs.size())
         throw libsdod_exception(ErrorCode::INTERNAL_ERROR, format("Output index too large: {}", idx), __func__, __FILE__, STR(__LINE__));
-    QnnTensor ret{ *api, ctx.get(), output_slots[idx], batch };
+    QnnTensor ret{ *api, ctx->get_handle(), output_slots[idx], batch };
     if (activate)
         ret.activate();
     return ret;
@@ -707,28 +707,13 @@ void QnnGraph::execute_async(std::function<void(void*, Qnn_NotifyStatus_t)> noti
 
 
 QnnContext::QnnContext(qnn_hnd<Qnn_ContextHandle_t> ctx, std::shared_ptr<void> dl, std::function<void()> free_fn)
-    : ctx(ctx), graphs(), dl(std::move(dl)), free_fn(std::move(free_fn)) {
+    : ctx(ctx), dl(std::move(dl)), free_fn(std::move(free_fn)) {
 }
 
 
 QnnContext::~QnnContext() {
     if (free_fn)
         free_fn();
-}
-
-
-graph_ref QnnContext::add_graph(std::shared_ptr<QnnContext> const& self, std::shared_ptr<QnnApi> const& api, Qnn_GraphHandle_t hnd, const char* name, std::span<Qnn_Tensor_t> inputs, std::span<Qnn_Tensor_t> outputs) {
-    if (self.get() != this)
-        throw libsdod_exception(ErrorCode::INVALID_ARGUMENT, "self should match this", __func__, __FILE__, STR(__LINE__));
-
-    return graphs.emplace_back(QnnGraph::CtorToken{
-        .graph = hnd,
-        .ctx = self,
-        .api = api,
-        .orig_name = name,
-        .inputs = inputs,
-        .outputs = outputs
-    });
 }
 
 
@@ -881,7 +866,7 @@ void QnnBackend::end_burst() {
 }
 
 
-graph_refs QnnBackend::load_context(std::string const& context_blob) {
+graph_list QnnBackend::load_context(std::string const& context_blob) {
 #ifdef NO_MMAP
     std::vector<unsigned char> buffer;
     if (!read_file_content(context_blob, buffer))
@@ -908,7 +893,7 @@ graph_refs QnnBackend::load_context(std::string const& context_blob) {
     debug("Context handler created");
 
     std::shared_ptr<QnnContext> ctx{ new QnnContext(context_hnd, system_hnd, nullptr) };
-    graph_refs ret;
+    graph_list ret;
 
     debug("Investigating context binary info...");
     auto&& bin_info = api->get_binary_info(system_hnd.get(), buffer);
@@ -929,14 +914,14 @@ graph_refs QnnBackend::load_context(std::string const& context_blob) {
         auto&& graph_info = graphs_info[i];
         if (graph_info.version == QNN_SYSTEM_CONTEXT_GRAPH_INFO_VERSION_1) {
             auto&& graph_hnd = api->retrieve_graph(context_hnd.get(), graph_info.graphInfoV1.graphName);
-            ret.emplace_back(ctx->add_graph(
-                ctx,
-                api,
-                graph_hnd,
-                graph_info.graphInfoV1.graphName,
-                std::span(graph_info.graphInfoV1.graphInputs, graph_info.graphInfoV1.numGraphInputs),
-                std::span(graph_info.graphInfoV1.graphOutputs, graph_info.graphInfoV1.numGraphOutputs)
-            ));
+            ret.emplace_back(QnnGraph::CtorToken{
+                .graph = graph_hnd,
+                .ctx = ctx,
+                .api = api,
+                .orig_name = graph_info.graphInfoV1.graphName,
+                .inputs = std::span(graph_info.graphInfoV1.graphInputs, graph_info.graphInfoV1.numGraphInputs),
+                .outputs = std::span(graph_info.graphInfoV1.graphOutputs, graph_info.graphInfoV1.numGraphOutputs)
+            });
         } else
             throw libsdod_exception(ErrorCode::INVALID_ARGUMENT, format("Unexpected graph info version: {}", graph_info.version), __func__, __FILE__, STR(__LINE__));
     }
@@ -945,7 +930,7 @@ graph_refs QnnBackend::load_context(std::string const& context_blob) {
 }
 
 
-graph_refs QnnBackend::load_model(std::string const& model_so) {
+graph_list QnnBackend::load_model(std::string const& model_so) {
     auto dl = std::shared_ptr<void>(dlopen(model_so.c_str(), RTLD_NOW | RTLD_LOCAL), _free_dl);
     if (!dl)
         throw libsdod_exception(ErrorCode::RUNTIME_ERROR, "Could not load model library: " + model_so, __func__, __FILE__, STR(__LINE__));
@@ -969,26 +954,26 @@ graph_refs QnnBackend::load_model(std::string const& model_so) {
     compose_fn(backend_hnd.get(), api->get_interface(), context_hnd.get(), graph_config_infos, graph_config_infos_count, &graph_infos, &graph_infos_count, false, qnn_log_callback, QNN_LOG_LEVEL_DEBUG);
 
     std::shared_ptr<QnnContext> ctx{ new QnnContext(context_hnd, dl, [free_fn, graph_infos, graph_infos_count]() mutable { if (graph_infos) free_fn(&graph_infos, graph_infos_count); }) };
-    graph_refs ret;
+    graph_list ret;
 
     for (auto i : range(graph_infos_count)) {
         auto&& graph_info = (*graph_infos)[i];
         api->finalize_graph(graph_info.graph);
-        ret.emplace_back(ctx->add_graph(
-            ctx,
-            api,
-            graph_info.graph,
-            graph_info.graphName,
-            std::span(graph_info.inputTensors, graph_info.numInputTensors),
-            std::span(graph_info.outputTensors, graph_info.numOutputTensors)
-        ));
+        ret.emplace_back(QnnGraph::CtorToken{
+            .graph = graph_info.graph,
+            .ctx = ctx,
+            .api = api,
+            .orig_name = graph_info.graphName,
+            .inputs = std::span(graph_info.inputTensors, graph_info.numInputTensors),
+            .outputs = std::span(graph_info.outputTensors, graph_info.numOutputTensors)
+        });
     }
 
     return ret;
 }
 
 
-graph_refs QnnBackend::load_graphs(std::string const& file, bool is_cached) {
+graph_list QnnBackend::load_graphs(std::string const& file, bool is_cached) {
     if (is_cached)
         return load_context(file);
     else

@@ -71,6 +71,8 @@ private:
 
     std::optional<DPMSolver> _solver;
 
+    graph_list _qnn_graphs;
+
     std::shared_ptr<QnnBackend> _qnn;
     std::optional<StableDiffusionModel> _model;
     std::optional<Tokenizer> _tokenizer;

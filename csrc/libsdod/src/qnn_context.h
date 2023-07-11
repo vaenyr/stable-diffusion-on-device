@@ -36,6 +36,7 @@ template <class T>
 using qnn_hnd = std::shared_ptr<std::remove_pointer_t<T>>;
 using graph_ref = std::add_lvalue_reference_t<QnnGraph>;
 using graph_refs = std::list<std::reference_wrapper<QnnGraph>>;
+using graph_list = std::list<QnnGraph>;
 using tensor_list = std::list<QnnTensor>;
 using graph_slots = std::vector<graph_slot>;
 
@@ -163,7 +164,7 @@ private:
 
 
 class QnnGraph {
-    friend class QnnContext;
+    friend class QnnBackend;
 private:
     struct CtorToken {
         Qnn_GraphHandle_t graph;
@@ -203,7 +204,7 @@ private:
     graph_slots output_slots;
 
     Qnn_GraphHandle_t graph;
-    qnn_hnd<Qnn_ContextHandle_t> ctx;
+    std::shared_ptr<QnnContext> ctx;
     std::shared_ptr<QnnApi> api;
 
     std::string name;
@@ -217,13 +218,12 @@ public:
     QnnContext(QnnContext&& other) = default;
     ~QnnContext();
 
-    graph_ref add_graph(std::shared_ptr<QnnContext> const& self, std::shared_ptr<QnnApi> const& api, Qnn_GraphHandle_t hnd, const char* name, std::span<Qnn_Tensor_t> inputs, std::span<Qnn_Tensor_t> outputs);
+    Qnn_ContextHandle_t get_handle() const { return ctx.get(); }
 
 private:
     QnnContext(qnn_hnd<Qnn_ContextHandle_t> ctx, std::shared_ptr<void> dl = nullptr, std::function<void()> free_fn = nullptr);
 
     qnn_hnd<Qnn_ContextHandle_t> ctx;
-    std::list<QnnGraph> graphs;
     std::shared_ptr<void> dl;
     std::function<void()> free_fn;
 };
@@ -235,10 +235,10 @@ public:
     QnnBackend(QnnBackendType backend, std::list<std::string> const& op_packages = std::list<std::string>(), bool burst = true);
     ~QnnBackend();
 
-    graph_refs load_context(std::string const& context_blob);
-    graph_refs load_model(std::string const& model_so);
+    graph_list load_context(std::string const& context_blob);
+    graph_list load_model(std::string const& model_so);
 
-    graph_refs load_graphs(std::string const& file, bool is_cached);
+    graph_list load_graphs(std::string const& file, bool is_cached);
 
     void start_burst();
     void end_burst();

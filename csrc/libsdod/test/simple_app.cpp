@@ -5,7 +5,7 @@
 int main() {
     void* ctx = nullptr;
 #ifdef __ANDROID__
-    int status = libsdod_setup(&ctx, "/data/local/tmp/libsdod", 4, 64, 8, 20, LIBSDOD_LOG_DEBUG, 0);
+    int status = libsdod_setup(&ctx, "/data/local/tmp/libsdod", 4, 64, 8, 20, LIBSDOD_LOG_INFO, 1);
 #else
     int status = libsdod_setup(&ctx, "../../../../dlc", 4, 64, 8, 20, LIBSDOD_LOG_DEBUG, 0);
 #endif
