@@ -71,10 +71,10 @@ def convert_onnx(onnx_file):
 
         import onnx
         _onnx_model = onnx.load(onnx_file, load_external_data=False)
-        extra_args['input_sizes'] = []
+        extra_args['input_sizes'] = {}
         for inp in _onnx_model.graph.input:
             sh = list(d.dim_value for d in inp.type.tensor_type.shape.dim)
-            extra_args['input_sizes'].append(sh)
+            extra_args['input_sizes'][inp.name] = sh
 
     if args.group_norm:
         extra_args['extra_tool_args'] = ['--op_package_config', 'csrc/sdod_ops/config/group_norm.json']
