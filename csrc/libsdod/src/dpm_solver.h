@@ -12,7 +12,7 @@ class DPMSolver {
 public:
     DPMSolver(unsigned int timesteps, double lin_start, double lin_end);
 
-    void prepare(unsigned int steps, std::vector<unsigned int>& model_ts);
+    void prepare(unsigned int steps, std::vector<float>& model_ts);
     void update(unsigned int step, std::vector<float>& x,  std::vector<float>& y);
 
     auto& get_all_t() const { return all_t; }
@@ -26,6 +26,8 @@ public:
     auto& get_i2rs() const { return i2rs; }
 
 private:
+    unsigned int total_timesteps;
+
     // defined for the original time steps (e.g., 1000)
     std::vector<double> all_t;
     std::vector<double> all_log_alpha;

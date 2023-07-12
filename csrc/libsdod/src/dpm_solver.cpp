@@ -65,13 +65,21 @@ void accumulate(std::vector<T>& v1, std::vector<T> const& v2, T a) {
         v1[i] += a*v2[i];
 }
 
+
+template <class T>
+void normalize(std::vector<T>& out, std::vector<T> const& v1, std::vector<T> const& v2, T a, T b) {
+    for (auto i : range(v1.size()))
+        out[i] = (v1[i] + a*v2[i]) / b;
+}
+
+
 }
 }
 
 using namespace libsdod;
 
 
-DPMSolver::DPMSolver(unsigned int timesteps, double lin_start, double lin_end) {
+DPMSolver::DPMSolver(unsigned int timesteps, double lin_start, double lin_end) : total_timesteps(timesteps) {
     linspace(all_t, 0.0, 1.0, timesteps+1, 1);
 
     // calculate sqrt(betas)
@@ -87,9 +95,9 @@ DPMSolver::DPMSolver(unsigned int timesteps, double lin_start, double lin_end) {
 }
 
 
-void DPMSolver::prepare(unsigned int steps, std::vector<unsigned int>& model_ts) {
+void DPMSolver::prepare(unsigned int steps, std::vector<float>& model_ts) {
     double first_t = 1.0;
-    double last_t = 1.0 / all_t.size();
+    double last_t = 1.0 / total_timesteps;
     linspace(ts, first_t, last_t, steps+1);
 
     model_ts.resize(ts.size());
@@ -102,7 +110,7 @@ void DPMSolver::prepare(unsigned int steps, std::vector<unsigned int>& model_ts)
 
     unsigned int interpolate_hint = all_t.size();
     for (auto i : range(ts.size())) {
-        model_ts[i] = ((ts[i] - 1.0 / all_t.size())*1000); // TODO: the choice of 1000 seems quite arbitrary in the DPM code, but it is what it is...
+        model_ts[i] = ((ts[i] - 1.0 / total_timesteps)*1000); // TODO: the choice of 1000 seems quite arbitrary in the DPM code, but it is what it is...
         log_alphas[i] = interpolate(ts[i], all_t, all_log_alpha, interpolate_hint);
         lambdas[i] = log_alphas[i] - (0.5 * std::log(1  - std::exp(2 * log_alphas[i])));
         sigmas[i] = std::sqrt(1 - std::exp(2 * log_alphas[i]));
@@ -125,6 +133,9 @@ using fs = std::initializer_list<double>;
 
 void DPMSolver::update(unsigned int step, std::vector<float>& x,  std::vector<float>& y) {
     auto order = (step == 0 ? 1 : (step < 10 ? std::min<unsigned int>(2, ts.size() - step) : 2));
+    // switch from noise prediction to data prediction
+    normalize<float>(y, x, y, -sigmas[step+1], 1.0/alphas[step+1]); // y = (x + (-sigma)*y) * (1/alpha) = (x - sigma*y) / alpha
+
     switch (order) {
     case 1:
 #ifdef LIBSDOD_DEBUG

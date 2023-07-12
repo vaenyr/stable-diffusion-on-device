@@ -290,7 +290,7 @@ void Context::prepare_schedule(unsigned int steps) {
     if (steps != 20)
         throw libsdod_exception(ErrorCode::INVALID_ARGUMENT, format("steps!=20 is currently not implemented, got: {}", steps), __func__, __FILE__, STR(__LINE__));
 
-    std::vector<uint32_t> _schedule;
+    std::vector<float> _schedule;
     _solver->prepare(steps, _schedule);
 
     //compute time embeddings
@@ -308,20 +308,14 @@ void Context::prepare_schedule(unsigned int steps) {
         auto half = mode_dim/2;
         t_embeddings[i].resize(temb_dim, 0.0f);
         for (auto j : range(half)) {
-            auto arg = _schedule[i] * std::exp(log_period * j / static_cast<float>(half));
+            auto arg = _schedule[i] * std::exp(log_period * j / half);
             mode[j] = std::cos(arg);
             mode[half+j] = std::sin(arg);
         }
-        debug("step {}, t: {}, embedding: {}", i, _schedule[i], mode);
 
-        auto&& tick = std::chrono::high_resolution_clock::now();
         temb_in->set_data(mode);
         _model->temb.execute();
         temb_out->get_data(t_embeddings[i]);
-        auto&& tock = std::chrono::high_resolution_clock::now();
-        auto&& diff = std::chrono::duration_cast<std::chrono::milliseconds>(tock - tick);
-        info("Computing time embeddings took {}ms", diff.count());
-        debug("   final embedding: {}", t_embeddings[i]);
     }
 
     info("Time schedule prepared for {} steps!", steps);
