@@ -17,11 +17,8 @@ namespace libsdod {
 
 
 struct StableDiffusionModel {
-    graph_ref unet_head;
-    graph_ref unet_outputs;
-    graph_ref unet_inputs;
+    graph_ref unet;
     graph_ref cond_model;
-    graph_ref unet_middle;
     graph_ref decoder;
     graph_ref temb;
 };
@@ -78,26 +75,25 @@ private:
     std::optional<StableDiffusionModel> _model;
     std::optional<Tokenizer> _tokenizer;
 
-    std::vector<Tokenizer::token_type> tokens_host;
-    std::vector<Tokenizer::token_type> empty_prompt_host;
+    std::vector<float> p_host;
     std::vector<float> x_host;
-    std::vector<float> y_host;
+    std::vector<float> e_host;
     std::vector<float> img_host;
+    std::vector<float> tmp;
 
     std::vector<std::vector<float>> t_embeddings; // sequence of encoded timesteps
 
     std::optional<QnnTensor> temb_in;
     std::optional<QnnTensor> temb_out;
     std::optional<QnnTensor> tokens;
-    std::optional<QnnTensor> p_cond;
-    std::optional<QnnTensor> p_uncond;
+    std::optional<QnnTensor> p;
     std::optional<QnnTensor> x;
     std::optional<QnnTensor> t;
+    std::optional<QnnTensor> p_cond;
+    std::optional<QnnTensor> p_uncond;
+    std::optional<QnnTensor> e;
     std::optional<QnnTensor> y;
     std::optional<QnnTensor> img;
-
-    std::list<QnnTensor> p_cond_inputs;
-    std::list<QnnTensor> p_uncond_inputs;
 
     tensor_list other_tensors;
 };

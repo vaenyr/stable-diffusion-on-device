@@ -6,7 +6,7 @@
 #include <sstream>
 
 
-std::string format_long(std::vector<double> const& v) {
+std::string format_long(std::vector<libsdod::DPMSolver::value_type> const& v) {
     std::ostringstream ss;
     ss << "\n    size: " << v.size();
     unsigned int i = 0;
@@ -29,7 +29,7 @@ int main() {
     std::cout << libsdod::format("all log alpha: {}", format_long(s.get_all_log_alpha())) << std::endl;
 
     unsigned int steps;
-    std::vector<unsigned int> ts;
+    std::vector<float> ts;
     while (std::cin >> steps) {
         s.prepare(steps, ts);
         std::cout << libsdod::format("{}", ts) << std::endl;

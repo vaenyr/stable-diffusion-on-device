@@ -25,13 +25,15 @@ void linspace(std::vector<T>& buffer, T start, T end, unsigned int num_steps, un
     }
 }
 
-inline double _interpolate(double x, double x1, double y1, double x2, double y2) {
-    double a = (y2 - y1) / (x2 - x1);
+template <class T>
+inline T _interpolate(T x, T x1, T y1, T x2, T y2) {
+    T a = (y2 - y1) / (x2 - x1);
     return a*(x - x1) + y1;
 }
 
 
-double interpolate(double x, std::vector<double> const& xs, std::vector<double> const& ys, unsigned int& hint) {
+template <class T>
+T interpolate(T x, std::vector<T> const& xs, std::vector<T> const& ys, unsigned int& hint) {
     // note: this method assumes xs is ascending, and x is descending over multiple calls with the same hint
     // initialize hint to xs.size()
     if (x < xs.front() || x > xs.back())
@@ -79,11 +81,11 @@ void normalize(std::vector<T>& out, std::vector<T> const& v1, std::vector<T> con
 using namespace libsdod;
 
 
-DPMSolver::DPMSolver(unsigned int timesteps, double lin_start, double lin_end) : total_timesteps(timesteps) {
-    linspace(all_t, 0.0, 1.0, timesteps+1, 1);
+DPMSolver::DPMSolver(unsigned int timesteps, value_type lin_start, value_type lin_end) : total_timesteps(timesteps) {
+    linspace<value_type>(all_t, 0.0, 1.0, timesteps+1, 1);
 
     // calculate sqrt(betas)
-    linspace(all_log_alpha, std::sqrt(lin_start), std::sqrt(lin_end), timesteps);
+    linspace<value_type>(all_log_alpha, std::sqrt(lin_start), std::sqrt(lin_end), timesteps);
 
     // calculate log cum_alphas
     auto cum = 1.0;
@@ -96,9 +98,9 @@ DPMSolver::DPMSolver(unsigned int timesteps, double lin_start, double lin_end) :
 
 
 void DPMSolver::prepare(unsigned int steps, std::vector<float>& model_ts) {
-    double first_t = 1.0;
-    double last_t = 1.0 / total_timesteps;
-    linspace(ts, first_t, last_t, steps+1);
+    value_type first_t = 1.0;
+    value_type last_t = 1.0 / total_timesteps;
+    linspace<value_type>(ts, first_t, last_t, steps+1);
 
     model_ts.resize(ts.size());
     log_alphas.resize(ts.size());
@@ -111,7 +113,7 @@ void DPMSolver::prepare(unsigned int steps, std::vector<float>& model_ts) {
     unsigned int interpolate_hint = all_t.size();
     for (auto i : range(ts.size())) {
         model_ts[i] = ((ts[i] - 1.0 / total_timesteps)*1000); // TODO: the choice of 1000 seems quite arbitrary in the DPM code, but it is what it is...
-        log_alphas[i] = interpolate(ts[i], all_t, all_log_alpha, interpolate_hint);
+        log_alphas[i] = interpolate<value_type>(ts[i], all_t, all_log_alpha, interpolate_hint);
         lambdas[i] = log_alphas[i] - (0.5 * std::log(1  - std::exp(2 * log_alphas[i])));
         sigmas[i] = std::sqrt(1 - std::exp(2 * log_alphas[i]));
         alphas[i] = std::exp(log_alphas[i]);
@@ -128,31 +130,32 @@ void DPMSolver::prepare(unsigned int steps, std::vector<float>& model_ts) {
     }
 }
 
-using fs = std::initializer_list<double>;
+using fs = std::initializer_list<DPMSolver::value_type>;
 
 
 void DPMSolver::update(unsigned int step, std::vector<float>& x,  std::vector<float>& y) {
     auto order = (step == 0 ? 1 : (step < 10 ? std::min<unsigned int>(2, ts.size() - step) : 2));
     // switch from noise prediction to data prediction
-    normalize<float>(y, x, y, -sigmas[step+1], 1.0/alphas[step+1]); // y = (x + (-sigma)*y) * (1/alpha) = (x - sigma*y) / alpha
+    normalize<float>(y, x, y, -sigmas[step], alphas[step]); // y = (x + (-sigma)*y) / /alpha
 
     switch (order) {
     case 1:
-#ifdef LIBSDOD_DEBUG
+#if defined(LIBSDOD_DEBUG)
         std::cout << format("SS DPM, t: {}, lambda: {}, log(a): {}, sigma: {}, alpha: {}, phi: {}",
             fs{ ts[step], ts[step+1] },
             fs{ lambdas[step], lambdas[step+1] },
             fs{ log_alphas[step], log_alphas[step+1] },
             fs{ sigmas[step], sigmas[step+1] },
-            alphas[step+1],
+            fs{ alphas[step], alphas[step+1] },
             phis[step+1]) << std::endl;
+        std::cout << format("    x: {}", std::span(x.data(), 15)) << std::endl << format("    y: {}", std::span(y.data(), 15)) << std::endl;
 #endif
         scale<float>(x, sigmas[step+1]/sigmas[step]);
         accumulate<float>(x, y, -alphas[step+1]*phis[step+1]);
         break;
 
     case 2:
-#ifdef LIBSDOD_DEBUG
+#if defined(LIBSDOD_DEBUG)
         std::cout << format("MS DPM, t: {}, lambda: {}, log(a): {}, sigma: {}, alpha: {}, phi: {}, i2r: {}",
             fs{ ts[step-1], ts[step], ts[step+1] },
             fs{ lambdas[step-1], lambdas[step], lambdas[step+1] },

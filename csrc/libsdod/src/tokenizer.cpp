@@ -141,6 +141,8 @@ struct token_iter {
         int type = 0;
         while (true) {
             if (!rem) {
+                if (type != 0)
+                    return;
                 ptr = end;
                 len = 0;
                 return;

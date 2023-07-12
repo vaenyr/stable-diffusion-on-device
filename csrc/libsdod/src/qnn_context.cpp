@@ -149,6 +149,13 @@ std::string _ttype_to_str(Qnn_TensorType_t ttype) {
 }
 
 
+std::string _get_quant_data(Qnn_DataType_t dtype, Qnn_QuantizeParams_t qparam) {
+    if ((dtype >> 8) != 3 && (dtype >> 8) != 4)
+        return "";
+    return format("{ scale: {}, offset: {} }", qparam.scaleOffsetEncoding.scale, qparam.scaleOffsetEncoding.offset);
+}
+
+
 struct _notify_fn_internal_workload {
     std::function<void(void*, Qnn_NotifyStatus_t)> fn;
     void* param;
@@ -182,10 +189,10 @@ namespace libsdod {
 
 // defined at the end of this file
 //arguments are such that first is always qnn memory, second is always host
-template <bool Accum, class T>
+template <bool Accum, bool Scale, class T>
 void qnn2host(const void* src, T* dst, unsigned int elements, const Qnn_Tensor_t& desc, float scale);
 
-template <bool Accum, class T>
+template <bool Accum, bool Scale, class T>
 void host2qnn(void* dst, const T* src, unsigned int elements, const Qnn_Tensor_t& desc, float scale);
 
 }
@@ -578,22 +585,25 @@ QnnTensor::QnnTensor(QnnTensor const& other, graph_slot& slot, bool strict_shape
 }
 
 
-#define _GENERIC_DATA_COPY(fn, accum, scale) \
+#define _GENERIC_DATA_COPY(fn, scale, scale_arg) \
     auto needed = get_num_elements(batch_size); \
     if (needed > buffer.size()) \
         throw libsdod_exception(ErrorCode::INVALID_ARGUMENT, format("Insufficient host vector! Got: {}, requires: {}", buffer.size(), needed), __func__, __FILE__, STR(__LINE__)); \
-    fn<accum>(data.get(), buffer.data(), buffer.size(), slot.target, scale)
+    if (accum) \
+        fn<true, scale>(data.get(), buffer.data(), buffer.size(), slot.target, scale_arg); \
+    else \
+        fn<false, scale>(data.get(), buffer.data(), buffer.size(), slot.target, scale_arg)
 
 
-void QnnTensor::set_data(std::vector<float> const& buffer) { _GENERIC_DATA_COPY(host2qnn, false, 0.0f); }
-void QnnTensor::set_data(std::vector<uint16_t> const& buffer) { _GENERIC_DATA_COPY(host2qnn, false, 0.0f); }
-void QnnTensor::set_data(std::vector<uint32_t> const& buffer) { _GENERIC_DATA_COPY(host2qnn, false, 0.0f); }
+void QnnTensor::set_data(std::vector<float> const& buffer, bool accum) { _GENERIC_DATA_COPY(host2qnn, false, 0.0f); }
+void QnnTensor::set_data(std::vector<uint16_t> const& buffer, bool accum) { _GENERIC_DATA_COPY(host2qnn, false, 0.0f); }
+void QnnTensor::set_data(std::vector<uint32_t> const& buffer, bool accum) { _GENERIC_DATA_COPY(host2qnn, false, 0.0f); }
 
-void QnnTensor::get_data(std::vector<float>& buffer) const { _GENERIC_DATA_COPY(qnn2host, false, 0.0f); }
-void QnnTensor::get_data(std::vector<uint16_t>& buffer) const { _GENERIC_DATA_COPY(qnn2host, false, 0.0f); }
-void QnnTensor::get_data(std::vector<uint32_t>& buffer) const { _GENERIC_DATA_COPY(qnn2host, false, 0.0f); }
+void QnnTensor::get_data(std::vector<float>& buffer, bool accum) const { _GENERIC_DATA_COPY(qnn2host, false, 0.0f); }
+void QnnTensor::get_data(std::vector<uint16_t>& buffer, bool accum) const { _GENERIC_DATA_COPY(qnn2host, false, 0.0f); }
+void QnnTensor::get_data(std::vector<uint32_t>& buffer, bool accum) const { _GENERIC_DATA_COPY(qnn2host, false, 0.0f); }
 
-void QnnTensor::get_data(std::vector<float>& buffer, float scale) const { _GENERIC_DATA_COPY(qnn2host, true, scale); }
+void QnnTensor::get_data(std::vector<float>& buffer, float scale, bool accum) const { _GENERIC_DATA_COPY(qnn2host, true, scale); }
 
 std::string QnnTensor::get_slot_name() const { return format("{}:{}", slot.graph.get_name(), slot.target.v1.name); }
 
@@ -605,11 +615,11 @@ QnnGraph::QnnGraph(QnnGraph::CtorToken&& token)
         debug("New graph: {} @ {}", orig_name, this);
         debug("    Num inputs: {}", inputs.size());
         for (auto&& t : this->inputs) {
-            debug("        {}: {}, {}, {}, {}", t.v1.name, _format_to_str(t.v1.dataFormat), _dtype_to_str(t.v1.dataType), _ttype_to_str(t.v1.type), std::span(t.v1.dimensions, t.v1.rank));
+            debug("        {}: {}, {}, {}, {} {}", t.v1.name, _format_to_str(t.v1.dataFormat), _dtype_to_str(t.v1.dataType), _ttype_to_str(t.v1.type), std::span(t.v1.dimensions, t.v1.rank), _get_quant_data(t.v1.dataType, t.v1.quantizeParams));
         }
         debug("    Num outputs: {}", outputs.size());
         for (auto&& t : this->outputs) {
-            debug("        {}: {}, {}, {}, {}", t.v1.name, _format_to_str(t.v1.dataFormat), _dtype_to_str(t.v1.dataType), _ttype_to_str(t.v1.type), std::span(t.v1.dimensions, t.v1.rank));
+            debug("        {}: {}, {}, {}, {} {}", t.v1.name, _format_to_str(t.v1.dataFormat), _dtype_to_str(t.v1.dataType), _ttype_to_str(t.v1.type), std::span(t.v1.dimensions, t.v1.rank), _get_quant_data(t.v1.dataType, t.v1.quantizeParams));
         }
     }
 
@@ -800,7 +810,7 @@ void QnnBackend::_init_performance() {
         std::memset(&power_config, 0, sizeof(power_config));
 
         power_config.option = QNN_HTP_PERF_INFRASTRUCTURE_POWER_CONFIGOPTION_DCVS_V3;
-        power_config.dcvsV3Config.dcvsEnable = 1;
+        power_config.dcvsV3Config.dcvsEnable = 0;
         power_config.dcvsV3Config.setDcvsEnable = 1;
         power_config.dcvsV3Config.contextId = _htp_power_config_id.value();
 
@@ -816,14 +826,14 @@ void QnnBackend::_init_performance() {
         power_config.dcvsV3Config.sleepLatency =  40;
 
         //set Bus Clock Parameters (refer QnnHtpPerfInfrastructure.h)
-        power_config.dcvsV3Config.busVoltageCornerMin = DCVS_VOLTAGE_VCORNER_TURBO_PLUS;
-        power_config.dcvsV3Config.busVoltageCornerTarget = DCVS_VOLTAGE_VCORNER_TURBO_PLUS;
-        power_config.dcvsV3Config.busVoltageCornerMax = DCVS_VOLTAGE_VCORNER_TURBO_PLUS;
+        power_config.dcvsV3Config.busVoltageCornerMin = DCVS_VOLTAGE_VCORNER_MAX_VOLTAGE_CORNER;
+        power_config.dcvsV3Config.busVoltageCornerTarget = DCVS_VOLTAGE_VCORNER_MAX_VOLTAGE_CORNER;
+        power_config.dcvsV3Config.busVoltageCornerMax = DCVS_VOLTAGE_VCORNER_MAX_VOLTAGE_CORNER;
 
         //set Core Clock Parameters (refer QnnHtpPerfInfrastructure.h)
-        power_config.dcvsV3Config.coreVoltageCornerMin = DCVS_VOLTAGE_VCORNER_TURBO_PLUS;
-        power_config.dcvsV3Config.coreVoltageCornerTarget = DCVS_VOLTAGE_VCORNER_TURBO_PLUS;
-        power_config.dcvsV3Config.coreVoltageCornerMax = DCVS_VOLTAGE_VCORNER_TURBO_PLUS;
+        power_config.dcvsV3Config.coreVoltageCornerMin = DCVS_VOLTAGE_VCORNER_MAX_VOLTAGE_CORNER;
+        power_config.dcvsV3Config.coreVoltageCornerTarget = DCVS_VOLTAGE_VCORNER_MAX_VOLTAGE_CORNER;
+        power_config.dcvsV3Config.coreVoltageCornerMax = DCVS_VOLTAGE_VCORNER_MAX_VOLTAGE_CORNER;
     }
 
     _htp_normal_power_config.emplace();
@@ -882,7 +892,7 @@ void QnnBackend::end_burst() {
 
 
 graph_list QnnBackend::load_context(std::string const& context_blob) {
-#ifdef NO_MMAP
+#if defined(NO_MMAP)
     std::vector<unsigned char> buffer;
     if (!read_file_content(context_blob, buffer))
         throw libsdod_exception(ErrorCode::INVALID_ARGUMENT, format("Could not read content of the context blob: {}", context_blob), __func__, __FILE__, STR(__LINE__));
@@ -912,6 +922,7 @@ graph_list QnnBackend::load_context(std::string const& context_blob) {
 
     debug("Investigating context binary info...");
     auto&& bin_info = api->get_binary_info(system_hnd.get(), buffer);
+
 
     QnnSystemContext_GraphInfo_t* graphs_info = nullptr;
     uint32_t num_graphs = 0;
@@ -1004,25 +1015,29 @@ graph_list QnnBackend::load_graphs(std::string const& file, bool is_cached) {
 namespace libsdod { namespace {
 
 
-template <bool Accum, class T, class U>
+template <bool Accum, bool Scale, class T, class U>
 void tf2any(T* out, const U* in, int32_t offset, float scale, std::size_t elements, float accum_scale) {
     static_assert(std::is_unsigned<U>::value, "tf2float supports only unsigned types!");
     double offset_d = static_cast<double>(offset);
     for (auto i : range(elements)) {
         double quant = static_cast<double>(in[i]);
-        if constexpr (Accum)
+        if constexpr (Accum && Scale)
             out[i] += static_cast<T>(accum_scale * static_cast<float>((quant + offset_d) * scale));
+        else if constexpr (Accum)
+            out[i] += static_cast<T>((quant + offset_d) * scale);
+        else if constexpr (Scale)
+            out[i] = static_cast<T>(accum_scale * static_cast<float>((quant + offset_d) * scale));
         else
             out[i] = static_cast<T>((quant + offset_d) * scale);
     }
 }
 
-template <bool Accum, class T, class U>
+template <bool Accum, bool Scale, class T, class U>
 void any2tf(T* out, const U* in, int32_t offset, float scale, std::size_t elements, float accum_scale) {
     static_assert(std::is_unsigned<T>::value, "float2tf supports only unsigned types!");
 
     std::size_t bits = sizeof(T) * 8;
-    double max_in = double((1 << bits) - 1);
+    double max_in = double((2 << bits) - 1);
     double enc_min = offset * scale;
     double enc_max = (max_in + offset) * scale;
     double enc_range = enc_max - enc_min;
@@ -1030,29 +1045,36 @@ void any2tf(T* out, const U* in, int32_t offset, float scale, std::size_t elemen
     int upper = (int)max_in;
 
     T quant_scale;
-    if constexpr (Accum) {
+    if constexpr (Scale) {
         quant_scale = static_cast<T>(std::clamp<int>(std::round(max_in * (accum_scale - enc_min) / enc_range), lower, upper));
     }
 
     for (auto i : range(elements)) {
         int quant = std::clamp<int>(std::round(max_in * (static_cast<double>(in[i]) - enc_min) / enc_range), lower, upper);
-        if constexpr (Accum)
+        if constexpr (Accum && Scale)
             out[i] += quant_scale * static_cast<T>(quant);
+        else if constexpr (Accum)
+            out[i] += static_cast<T>(quant);
+        else if constexpr (Scale)
+            out[i] = quant_scale * static_cast<T>(quant);
         else
             out[i] = static_cast<T>(quant);
     }
 }
 
-template <bool Accum, class T, class U>
+template <bool Accum, bool Scale, class T, class U>
 void simple_cast(T* dst, const U* src, std::size_t elements, float scale) {
-    if constexpr (Accum) {
-        for (auto i : range(elements))
-            dst[i] += static_cast<T>(static_cast<float>(src[i]) * scale);
-    } else {
-        if constexpr (std::is_same<T, U>::value)
-            std::memcpy(dst, src, elements*sizeof(T));
-        else {
-            for (auto i : range(elements))
+    if constexpr (!Accum && !Scale && std::is_same<T, U>::value)
+        std::memcpy(dst, src, elements*sizeof(T));
+    else {
+        for (auto i : range(elements)) {
+            if constexpr (Accum && Scale)
+                dst[i] += static_cast<T>(static_cast<float>(src[i]) * scale);
+            else if constexpr (Accum)
+                dst[i] += static_cast<T>(src[i]);
+            else if constexpr (Scale)
+                dst[i] = static_cast<T>(static_cast<float>(src[i]) * scale);
+            else
                 dst[i] = static_cast<T>(src[i]);
         }
     }
@@ -1061,29 +1083,29 @@ void simple_cast(T* dst, const U* src, std::size_t elements, float scale) {
 }
 
 
-template <bool Accum, class T>
+template <bool Accum, bool Scale, class T>
 void qnn2host(const void* src, T* dst, unsigned int elements, const Qnn_Tensor_t& desc, float scale) {
     switch (desc.v1.dataType) {
     case QNN_DATATYPE_UFIXED_POINT_8:
-        tf2any<Accum>(dst, reinterpret_cast<const uint8_t*>(src), desc.v1.quantizeParams.scaleOffsetEncoding.offset, desc.v1.quantizeParams.scaleOffsetEncoding.scale, elements, scale);
+        tf2any<Accum, Scale>(dst, reinterpret_cast<const uint8_t*>(src), desc.v1.quantizeParams.scaleOffsetEncoding.offset, desc.v1.quantizeParams.scaleOffsetEncoding.scale, elements, scale);
         break;
 
     case QNN_DATATYPE_UFIXED_POINT_16:
-        tf2any<Accum>(dst, reinterpret_cast<const uint16_t*>(src), desc.v1.quantizeParams.scaleOffsetEncoding.offset, desc.v1.quantizeParams.scaleOffsetEncoding.scale, elements, scale);
+        tf2any<Accum, Scale>(dst, reinterpret_cast<const uint16_t*>(src), desc.v1.quantizeParams.scaleOffsetEncoding.offset, desc.v1.quantizeParams.scaleOffsetEncoding.scale, elements, scale);
         break;
 
-    case QNN_DATATYPE_FLOAT_16: return simple_cast<Accum>(dst, reinterpret_cast<const __fp16*>(src), elements, scale);
-    case QNN_DATATYPE_FLOAT_32: return simple_cast<Accum>(dst, reinterpret_cast<const float*>(src), elements, scale);
+    case QNN_DATATYPE_FLOAT_16: return simple_cast<Accum, Scale>(dst, reinterpret_cast<const __fp16*>(src), elements, scale);
+    case QNN_DATATYPE_FLOAT_32: return simple_cast<Accum, Scale>(dst, reinterpret_cast<const float*>(src), elements, scale);
 
-    case QNN_DATATYPE_UINT_8: return simple_cast<Accum>(dst, reinterpret_cast<const uint8_t*>(src), elements, scale);
-    case QNN_DATATYPE_UINT_16: return simple_cast<Accum>(dst, reinterpret_cast<const uint16_t*>(src), elements, scale);
-    case QNN_DATATYPE_UINT_32: return simple_cast<Accum>(dst, reinterpret_cast<const uint32_t*>(src), elements, scale);
-    case QNN_DATATYPE_UINT_64: return simple_cast<Accum>(dst, reinterpret_cast<const uint64_t*>(src), elements, scale);
+    case QNN_DATATYPE_UINT_8: return simple_cast<Accum, Scale>(dst, reinterpret_cast<const uint8_t*>(src), elements, scale);
+    case QNN_DATATYPE_UINT_16: return simple_cast<Accum, Scale>(dst, reinterpret_cast<const uint16_t*>(src), elements, scale);
+    case QNN_DATATYPE_UINT_32: return simple_cast<Accum, Scale>(dst, reinterpret_cast<const uint32_t*>(src), elements, scale);
+    case QNN_DATATYPE_UINT_64: return simple_cast<Accum, Scale>(dst, reinterpret_cast<const uint64_t*>(src), elements, scale);
 
-    case QNN_DATATYPE_INT_8: return simple_cast<Accum>(dst, reinterpret_cast<const int8_t*>(src), elements, scale);
-    case QNN_DATATYPE_INT_16: return simple_cast<Accum>(dst, reinterpret_cast<const int16_t*>(src), elements, scale);
-    case QNN_DATATYPE_INT_32: return simple_cast<Accum>(dst, reinterpret_cast<const int32_t*>(src), elements, scale);
-    case QNN_DATATYPE_INT_64: return simple_cast<Accum>(dst, reinterpret_cast<const int64_t*>(src), elements, scale);
+    case QNN_DATATYPE_INT_8: return simple_cast<Accum, Scale>(dst, reinterpret_cast<const int8_t*>(src), elements, scale);
+    case QNN_DATATYPE_INT_16: return simple_cast<Accum, Scale>(dst, reinterpret_cast<const int16_t*>(src), elements, scale);
+    case QNN_DATATYPE_INT_32: return simple_cast<Accum, Scale>(dst, reinterpret_cast<const int32_t*>(src), elements, scale);
+    case QNN_DATATYPE_INT_64: return simple_cast<Accum, Scale>(dst, reinterpret_cast<const int64_t*>(src), elements, scale);
 
     default:
         throw libsdod_exception(ErrorCode::INVALID_ARGUMENT, format("Unexpected source tensor data type when copying to a host buffer: {}", _dtype_to_str(desc.v1.dataType)), __func__, __FILE__, STR(__LINE__));
@@ -1091,29 +1113,29 @@ void qnn2host(const void* src, T* dst, unsigned int elements, const Qnn_Tensor_t
 }
 
 
-template <bool Accum, class T>
+template <bool Accum, bool Scale, class T>
 void host2qnn(void* dst, const T* src, unsigned int elements, const Qnn_Tensor_t& desc, float scale) {
     switch (desc.v1.dataType) {
     case QNN_DATATYPE_UFIXED_POINT_8:
-        any2tf<Accum>(reinterpret_cast<uint8_t*>(dst), src, desc.v1.quantizeParams.scaleOffsetEncoding.offset, desc.v1.quantizeParams.scaleOffsetEncoding.scale, elements, scale);
+        any2tf<Accum, Scale>(reinterpret_cast<uint8_t*>(dst), src, desc.v1.quantizeParams.scaleOffsetEncoding.offset, desc.v1.quantizeParams.scaleOffsetEncoding.scale, elements, scale);
         break;
 
     case QNN_DATATYPE_UFIXED_POINT_16:
-        any2tf<Accum>(reinterpret_cast<uint16_t*>(dst), src, desc.v1.quantizeParams.scaleOffsetEncoding.offset, desc.v1.quantizeParams.scaleOffsetEncoding.scale, elements, scale);
+        any2tf<Accum, Scale>(reinterpret_cast<uint16_t*>(dst), src, desc.v1.quantizeParams.scaleOffsetEncoding.offset, desc.v1.quantizeParams.scaleOffsetEncoding.scale, elements, scale);
         break;
 
-    case QNN_DATATYPE_FLOAT_16: return simple_cast<Accum>(reinterpret_cast<__fp16*>(dst), src, elements, scale);
-    case QNN_DATATYPE_FLOAT_32: return simple_cast<Accum>(reinterpret_cast<float*>(dst), src, elements, scale);
+    case QNN_DATATYPE_FLOAT_16: return simple_cast<Accum, Scale>(reinterpret_cast<__fp16*>(dst), src, elements, scale);
+    case QNN_DATATYPE_FLOAT_32: return simple_cast<Accum, Scale>(reinterpret_cast<float*>(dst), src, elements, scale);
 
-    case QNN_DATATYPE_UINT_8: return simple_cast<Accum>(reinterpret_cast<uint8_t*>(dst), src, elements, scale);
-    case QNN_DATATYPE_UINT_16: return simple_cast<Accum>(reinterpret_cast<uint16_t*>(dst), src, elements, scale);
-    case QNN_DATATYPE_UINT_32: return simple_cast<Accum>(reinterpret_cast<uint32_t*>(dst), src, elements, scale);
-    case QNN_DATATYPE_UINT_64: return simple_cast<Accum>(reinterpret_cast<uint64_t*>(dst), src, elements, scale);
+    case QNN_DATATYPE_UINT_8: return simple_cast<Accum, Scale>(reinterpret_cast<uint8_t*>(dst), src, elements, scale);
+    case QNN_DATATYPE_UINT_16: return simple_cast<Accum, Scale>(reinterpret_cast<uint16_t*>(dst), src, elements, scale);
+    case QNN_DATATYPE_UINT_32: return simple_cast<Accum, Scale>(reinterpret_cast<uint32_t*>(dst), src, elements, scale);
+    case QNN_DATATYPE_UINT_64: return simple_cast<Accum, Scale>(reinterpret_cast<uint64_t*>(dst), src, elements, scale);
 
-    case QNN_DATATYPE_INT_8: return simple_cast<Accum>(reinterpret_cast<int8_t*>(dst), src, elements, scale);
-    case QNN_DATATYPE_INT_16: return simple_cast<Accum>(reinterpret_cast<int16_t*>(dst), src, elements, scale);
-    case QNN_DATATYPE_INT_32: return simple_cast<Accum>(reinterpret_cast<int32_t*>(dst), src, elements, scale);
-    case QNN_DATATYPE_INT_64: return simple_cast<Accum>(reinterpret_cast<int64_t*>(dst), src, elements, scale);
+    case QNN_DATATYPE_INT_8: return simple_cast<Accum, Scale>(reinterpret_cast<int8_t*>(dst), src, elements, scale);
+    case QNN_DATATYPE_INT_16: return simple_cast<Accum, Scale>(reinterpret_cast<int16_t*>(dst), src, elements, scale);
+    case QNN_DATATYPE_INT_32: return simple_cast<Accum, Scale>(reinterpret_cast<int32_t*>(dst), src, elements, scale);
+    case QNN_DATATYPE_INT_64: return simple_cast<Accum, Scale>(reinterpret_cast<int64_t*>(dst), src, elements, scale);
 
     default:
         throw libsdod_exception(ErrorCode::INVALID_ARGUMENT, format("Unexpected destination tensor data type when copying a host buffer: {}", _dtype_to_str(desc.v1.dataType)), __func__, __FILE__, STR(__LINE__));

@@ -38,8 +38,8 @@ clean_x86:
 	@rm -rf bin/x86_64-linux-clang/libsdod.so bin/x86_64-linux-clang/test obj/x86_64-linux-clang
 
 tests:
-	$(call build_if_exists,test,$(CXX) -std=c++20 -g -O0 -DLIBSDOD_DEBUG=1 -I src -I $(QNN_SDK_ROOT)/include test/test_tokenizer.cpp src/tokenizer.cpp src/utils.cpp src/errors.cpp -o bin/x86_64-linux-clang/test_tokenizer)
-	$(call build_if_exists,test,$(CXX) -std=c++20 -g -O0 -DLIBSDOD_DEBUG=1 -I src -I $(QNN_SDK_ROOT)/include test/test_dpm.cpp src/dpm_solver.cpp src/utils.cpp src/errors.cpp -o bin/x86_64-linux-clang/test_dpm)
+	$(call build_if_exists,test,$(CXX) -std=c++20 -g -O0 -DLIBSDOD_DEBUG=1 -I src -I $(QNN_SDK_ROOT)/include test/test_tokenizer.cpp src/tokenizer.cpp src/logging.cpp src/utils.cpp src/errors.cpp -o bin/x86_64-linux-clang/test_tokenizer)
+	$(call build_if_exists,test,$(CXX) -std=c++20 -g -O0 -DLIBSDOD_DEBUG=1 -I src -I $(QNN_SDK_ROOT)/include test/test_dpm.cpp src/dpm_solver.cpp src/logging.cpp src/utils.cpp src/errors.cpp -o bin/x86_64-linux-clang/test_dpm)
 
 # Android Targets
 

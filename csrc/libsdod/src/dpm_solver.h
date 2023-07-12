@@ -10,7 +10,10 @@ namespace libsdod {
 
 class DPMSolver {
 public:
-    DPMSolver(unsigned int timesteps, double lin_start, double lin_end);
+    using value_type = float;
+
+public:
+    DPMSolver(unsigned int timesteps, value_type lin_start, value_type lin_end);
 
     void prepare(unsigned int steps, std::vector<float>& model_ts);
     void update(unsigned int step, std::vector<float>& x,  std::vector<float>& y);
@@ -29,17 +32,17 @@ private:
     unsigned int total_timesteps;
 
     // defined for the original time steps (e.g., 1000)
-    std::vector<double> all_t;
-    std::vector<double> all_log_alpha;
+    std::vector<value_type> all_t;
+    std::vector<value_type> all_log_alpha;
 
     // defined for a particular number of ODE steps (e.g., 20)
-    std::vector<double> ts;
-    std::vector<double> log_alphas;
-    std::vector<double> lambdas;
-    std::vector<double> sigmas;
-    std::vector<double> alphas;
-    std::vector<double> phis;
-    std::vector<double> i2rs;
+    std::vector<value_type> ts;
+    std::vector<value_type> log_alphas;
+    std::vector<value_type> lambdas;
+    std::vector<value_type> sigmas;
+    std::vector<value_type> alphas;
+    std::vector<value_type> phis;
+    std::vector<value_type> i2rs;
 
     std::vector<float> prev_y;
 };

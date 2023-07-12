@@ -7,3 +7,4 @@ obj/
 libs/
 sdod/csrc/GroupNormPackage
 bin/
+output.bin

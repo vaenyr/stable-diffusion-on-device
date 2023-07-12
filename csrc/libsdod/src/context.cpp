@@ -27,14 +27,14 @@ Context::~Context() {
     temb_in.reset();
     temb_out.reset();
     tokens.reset();
-    p_cond.reset();
-    p_uncond.reset();
+    p.reset();
     x.reset();
     t.reset();
+    p_cond.reset();
+    p_uncond.reset();
+    e.reset();
     y.reset();
     img.reset();
-    p_cond_inputs.clear();
-    p_uncond_inputs.clear();
     other_tensors.clear();
 
     _model.reset();
@@ -102,7 +102,7 @@ void Context::load_models() {
 #if !defined(NOTHREADS) && !defined(LIBSDOD_DEBUG)
     std::map<std::string, QnnGraph*> _graphs;
     std::mutex _graphs_mutex;
-    auto&& _graph_names = std::array{ "sd_unet_outputs", "sd_unet_inputs", "cond_model", "sd_unet_middle", "decoder", "sd_unet_head", "temb" };
+    auto&& _graph_names = std::array{ "unet.serialized", "text_encoder.serialized", "vae_decoder.serialized", "temb" };
 
     auto&& get_model_async = [this, &_graphs, &_graphs_mutex](const char* name) {
         auto&& _log_guard = activate_logger();
@@ -139,12 +139,9 @@ void Context::load_models() {
         t.join();
 
     _model.emplace(StableDiffusionModel{
-        .unet_head = *_graphs["sd_unet_head"],
-        .unet_outputs = *_graphs["sd_unet_outputs"],
-        .unet_inputs = *_graphs["sd_unet_inputs"],
-        .cond_model = *_graphs["cond_model"],
-        .unet_middle = *_graphs["sd_unet_middle"],
-        .decoder = *_graphs["decoder"],
+        .unet = *_graphs["unet.serialized"],
+        .cond_model = *_graphs["text_encoder.serialized"],
+        .decoder = *_graphs["vae_decoder.serialized"],
         .temb = *_graphs["temb"]
     });
 #else
@@ -169,12 +166,9 @@ void Context::load_models() {
     };
 
     _model.emplace(StableDiffusionModel{
-        .unet_head = get_model("sd_unet_head"),
-        .unet_outputs = get_model("sd_unet_outputs"),
-        .unet_inputs = get_model("sd_unet_inputs"),
-        .cond_model = get_model("cond_model"),
-        .unet_middle = get_model("sd_unet_middle"),
-        .decoder = get_model("decoder"),
+        .unet = get_model("unet.serialized"),
+        .cond_model = get_model("text_encoder.serialized"),
+        .decoder = get_model("vae_decoder.serialized"),
         .temb = get_model("temb")
     });
 #endif
@@ -213,70 +207,36 @@ void Context::prepare_buffers() {
     // allocate important tensors
     temb_in.emplace(_model->temb.allocate_input(0));
     temb_out.emplace(_model->temb.allocate_output(0));
+
     tokens.emplace(_model->cond_model.allocate_input(0));
-    p_cond.emplace(_model->cond_model.allocate_output(0));
-    p_uncond.emplace(_model->cond_model.allocate_output(0));
-    x.emplace(_model->unet_inputs.allocate_input(0));
-    t.emplace(_model->unet_inputs.allocate_input(1));
-    y.emplace(_model->unet_head.allocate_output(0));
+    p.emplace(_model->cond_model.allocate_output(0));
+
+    x.emplace(_model->unet.allocate_input(0));
+    t.emplace(_model->unet.allocate_input(1));
+    p_cond.emplace(_model->unet.allocate_input(2));
+    p_uncond.emplace(_model->unet.allocate_input(2));
+    e.emplace(_model->unet.allocate_output(0));
+
+    y.emplace(_model->decoder.allocate_input(0));
     img.emplace(_model->decoder.allocate_output(0));
-
-    // attach time embeddings
-    other_tensors.emplace_back(_model->unet_middle.attach_input(1, t.value()));
-    other_tensors.emplace_back(_model->unet_outputs.attach_input(1, t.value()));
-
-    // attach prompt
-    p_cond_inputs.emplace_back(_model->unet_inputs.attach_input(2, p_cond.value()));
-    p_cond_inputs.emplace_back(_model->unet_middle.attach_input(2, p_cond.value()));
-    p_cond_inputs.emplace_back(_model->unet_outputs.attach_input(2, p_cond.value()));
-
-    p_uncond_inputs.emplace_back(_model->unet_inputs.attach_input(2, p_uncond.value()));
-    p_uncond_inputs.emplace_back(_model->unet_middle.attach_input(2, p_uncond.value()));
-    p_uncond_inputs.emplace_back(_model->unet_outputs.attach_input(2, p_uncond.value()));
-
-    // inputs <-> { middle, outputs }
-    for (auto i : range(_model->unet_inputs.get_num_outputs())) {
-        auto& o = other_tensors.emplace_back(_model->unet_inputs.allocate_output(i));
-        //skip connection to outputs
-        other_tensors.emplace_back(_model->unet_outputs.attach_input(3+i, o));
-        //if last output, also connect to middle
-        if (i+1 == _model->unet_inputs.get_num_outputs())
-            other_tensors.emplace_back(_model->unet_middle.attach_input(0, o));
-    }
-
-    // middle <-> outputs
-    other_tensors.emplace_back(_model->unet_middle.allocate_output(0));
-    other_tensors.emplace_back(_model->unet_outputs.attach_input(0, other_tensors.back()));
-
-    // outputs <-> head
-    other_tensors.emplace_back(_model->unet_outputs.allocate_output(0));
-    other_tensors.emplace_back(_model->unet_head.attach_input(0, other_tensors.back()));
-
-    // head <-> decoder
-    other_tensors.emplace_back(_model->decoder.attach_input(0, y.value()));
 
     _model->cond_model.verify();
     _model->decoder.verify();
-    _model->unet_inputs.verify();
-    _model->unet_middle.verify();
-    _model->unet_outputs.verify();
-    _model->unet_head.verify();
+    _model->unet.verify();
+    _model->temb.verify();
 
-    tokens_host.resize(77);
-    empty_prompt_host.resize(77);
+    p_host.resize(p->get_num_elements(1));
     x_host.resize(latent_channels * latent_spatial * latent_spatial);
-    y_host.resize(latent_channels * latent_spatial * latent_spatial);
+    e_host.resize(latent_channels * latent_spatial * latent_spatial);
     img_host.resize(3 * latent_spatial * upscale_factor * latent_spatial * upscale_factor);
 
     // precompute empty prompt conditioning
-    // _tokenizer->tokenize(empty_prompt_host, "");
-    // tokens->set_data(empty_prompt_host);
-    // p_uncond->activate();
-    // _model->cond_model.execute();
-
-    p_cond->activate();
-    for (auto&& t : p_cond_inputs)
-        t.activate();
+    std::vector<Tokenizer::token_type> tokens_host;
+    _tokenizer->tokenize(tokens_host, "");
+    tokens->set_data(tokens_host);
+    _model->cond_model.execute();
+    p->get_data(p_host);
+    p_uncond->set_data(p_host);
 
     info("Input/output buffers created and prepared!");
 }
@@ -353,67 +313,85 @@ void Context::generate(std::string const& prompt, float guidance, Buffer<unsigne
         info("{} took {}ms", name, diff.count());
     };
 
+    // auto&& data_preview = [](std::vector<float> const& data, std::string const& msg) {
+    //     std::vector<float> copy(data.data(), data.data() + std::min<size_t>(data.size(), 15));
+    //     error("{}: (size: {}) {}", msg, data.size(), copy);
+    // };
+
     auto&& burst_scope_guard = scope_guard([this](){ _qnn->start_burst(); }, [this]() { _qnn->end_burst(); });
     (void)burst_scope_guard;
 
     auto&& tick = std::chrono::high_resolution_clock::now();
-    tokens_host = _tokenizer->tokenize(prompt);
+    auto&& tokens_host = _tokenizer->tokenize(prompt);
     tokens->set_data(tokens_host);
     _model->cond_model.execute();
+    p->get_data(p_host);
+    p_cond->set_data(p_host);
     auto&& tock = std::chrono::high_resolution_clock::now();
     _report_time("Conditioning", tick, tock);
 
     for (auto& f : x_host)
         f = _normal(_random_gen);
 
+    // //debug
+    // tmp.resize(p_cond->get_num_elements(1));
+    // p->get_data(tmp);
+    // data_preview(tmp, "Prompt embedding");
+
     unsigned int step = 0;
     for (auto&& t_host : t_embeddings) {
         tick = std::chrono::high_resolution_clock::now();
 
+        // data_preview(x_host, format("Unet input, step: {}", step));
+        // data_preview(t_host, format("Unet t, step: {}", step));
+
         t->set_data(t_host);
         x->set_data(x_host);
+        p_cond->activate();
 
-        _model->unet_inputs.execute();
-        _model->unet_middle.execute();
-        _model->unet_outputs.execute();
-        _model->unet_head.execute();
+        _model->unet.execute();
+
+        // //debug
+        // tmp.resize(e->get_num_elements(1));
+        // e->get_data(tmp);
+        // data_preview(tmp, "    Cond output");
 
         if (guidance == 1.0f)
-            y->get_data(y_host);
+            e->get_data(e_host);
         else {
-            y->get_data(y_host, guidance);
+            e->get_data(e_host, guidance);
 
-            for (auto&& t : p_uncond_inputs)
-                t.activate();
+            p_uncond->activate();
 
-            _model->unet_inputs.execute();
-            _model->unet_middle.execute();
-            _model->unet_outputs.execute();
-            _model->unet_head.execute();
+            _model->unet.execute();
 
-            y->get_data(y_host, 1-guidance);
+            // //debug
+            // tmp.resize(e->get_num_elements(1));
+            // e->get_data(tmp);
+            // data_preview(tmp, "    Uncond output");
 
-            for (auto&& t : p_cond_inputs)
-                t.activate();
+            e->get_data(e_host, 1-guidance, true);
+
+            // data_preview(e_host, format("Unet output, step: {}", step));
         }
 
-        _solver->update(step++, x_host, y_host);
+        _solver->update(step++, x_host, e_host);
 
         tock = std::chrono::high_resolution_clock::now();
         _report_time("Single iteration", tick, tock);
     }
 
-
     tick = std::chrono::high_resolution_clock::now();
 
     y->set_data(x_host);
     _model->decoder.execute();
-    img->get_data(img_host, 1 / 0.18215);
+    img->get_data(img_host); //, 1 / 0.18215, false);
+    debug("Output image has {} elements", img_host.size());
     auto* output_ptr = output.data_ptr();
     // decode img to uint8 pixels
     for (auto i : range(img_host.size())) {
         auto f = img_host[i];
-        output_ptr[i] = static_cast<uint8_t>(255 * std::clamp(((f + 1) / 2), 0.0f, 1.0f));
+        output_ptr[i] = static_cast<uint8_t>(std::clamp(255 * f, 0.0f, 255.0f));
     }
 
     tock = std::chrono::high_resolution_clock::now();

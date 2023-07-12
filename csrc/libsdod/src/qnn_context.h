@@ -135,15 +135,15 @@ public:
     bool is_quantized() const { return is_quantized(slot.target); }
     bool is_floating_point() const { return is_floating_point(slot.target); }
 
-    void set_data(std::vector<float> const& buffer);
-    void set_data(std::vector<uint16_t> const& buffer);
-    void set_data(std::vector<uint32_t> const& buffer);
+    void set_data(std::vector<float> const& buffer, bool accum=false);
+    void set_data(std::vector<uint16_t> const& buffer, bool accum=false);
+    void set_data(std::vector<uint32_t> const& buffer, bool accum=false);
 
-    void get_data(std::vector<float>& buffer) const; //copy data
-    void get_data(std::vector<uint16_t>& buffer) const;
-    void get_data(std::vector<uint32_t>& buffer) const;
+    void get_data(std::vector<float>& buffer, bool accum=false) const; //copy data
+    void get_data(std::vector<uint16_t>& buffer, bool accum=false) const;
+    void get_data(std::vector<uint32_t>& buffer, bool accum=false) const;
 
-    void get_data(std::vector<float>& buffer, float scale) const; //accumulate scaled
+    void get_data(std::vector<float>& buffer, float scale, bool accum=false) const;
 
     std::string get_slot_name() const;
 

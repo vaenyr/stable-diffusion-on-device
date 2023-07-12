@@ -1,11 +1,12 @@
 #include <iostream>
+#include <fstream>
 
 #include "libsdod.h"
 
 int main() {
     void* ctx = nullptr;
 #ifdef __ANDROID__
-    int status = libsdod_setup(&ctx, "/data/local/tmp/libsdod", 4, 64, 8, 20, LIBSDOD_LOG_DEBUG, 1);
+    int status = libsdod_setup(&ctx, "/data/local/tmp/libsdod", 4, 64, 8, 20, LIBSDOD_LOG_INFO, 1);
 #else
     int status = libsdod_setup(&ctx, "../../../../dlc", 4, 64, 8, 20, LIBSDOD_LOG_DEBUG, 1);
 #endif
@@ -26,6 +27,10 @@ int main() {
             libsdod_release(ctx);
         return 1;
     }
+
+    std::ofstream out{ "output.bin", std::ios::binary };
+    out.write(reinterpret_cast<const char*>(img), img_len);
+    out.close();
 
     delete[] img;
     libsdod_release(ctx);
