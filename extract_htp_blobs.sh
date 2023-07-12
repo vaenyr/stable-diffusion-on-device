@@ -4,3 +4,4 @@ $NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/aarch64-linux-android/bin/objcop
 $NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/aarch64-linux-android/bin/objcopy --dump-section .autocaml.htp=dlc/sd_unet_outputs.bin dlc/sd_unet_outputs.qnn.so
 $NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/aarch64-linux-android/bin/objcopy --dump-section .autocaml.htp=dlc/sd_unet_head.bin dlc/sd_unet_head.qnn.so
 $NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/aarch64-linux-android/bin/objcopy --dump-section .autocaml.htp=dlc/decoder.bin dlc/decoder.qnn.so
+$NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/aarch64-linux-android/bin/objcopy --dump-section .autocaml.htp=dlc/temb.bin dlc/temb.qnn.so

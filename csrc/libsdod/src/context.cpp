@@ -24,6 +24,8 @@ Context::Context(std::string const& models_dir, unsigned int latent_channels, un
 
 
 Context::~Context() {
+    temb_in.reset();
+    temb_out.reset();
     tokens.reset();
     p_cond.reset();
     p_uncond.reset();
@@ -47,12 +49,13 @@ Context::~Context() {
 void Context::init_mt(unsigned int steps) {
     auto&& tick = std::chrono::high_resolution_clock::now();
 
-    auto&& init_models = std::thread([this]() {
+    auto&& init_models = std::thread([this, steps]() {
         auto&& _log_guard = activate_logger();
         (void)_log_guard;
         initialize_qnn();
         load_models();
         prepare_buffers();
+        prepare_schedule(steps);
     });
 
     auto&& init_tokenizer = std::thread([this]() {
@@ -61,11 +64,10 @@ void Context::init_mt(unsigned int steps) {
         load_tokenizer();
     });
 
-    auto&& init_solver = std::thread([this, steps]() {
+    auto&& init_solver = std::thread([this]() {
         auto&& _log_guard = activate_logger();
         (void)_log_guard;
         prepare_solver();
-        prepare_schedule(steps);
     });
 
     init_models.join();
@@ -100,7 +102,7 @@ void Context::load_models() {
 #if !defined(NOTHREADS) && !defined(LIBSDOD_DEBUG)
     std::map<std::string, QnnGraph*> _graphs;
     std::mutex _graphs_mutex;
-    auto&& _graph_names = std::array{ "sd_unet_outputs", "sd_unet_inputs", "cond_model", "sd_unet_middle", "decoder", "sd_unet_head" };
+    auto&& _graph_names = std::array{ "sd_unet_outputs", "sd_unet_inputs", "cond_model", "sd_unet_middle", "decoder", "sd_unet_head", "temb" };
 
     auto&& get_model_async = [this, &_graphs, &_graphs_mutex](const char* name) {
         auto&& _log_guard = activate_logger();
@@ -142,7 +144,8 @@ void Context::load_models() {
         .unet_inputs = *_graphs["sd_unet_inputs"],
         .cond_model = *_graphs["cond_model"],
         .unet_middle = *_graphs["sd_unet_middle"],
-        .decoder = *_graphs["decoder"]
+        .decoder = *_graphs["decoder"],
+        .temb = *_graphs["temb"]
     });
 #else
     auto&& get_model = [this](const char* name) -> graph_ref {
@@ -171,7 +174,8 @@ void Context::load_models() {
         .unet_inputs = get_model("sd_unet_inputs"),
         .cond_model = get_model("cond_model"),
         .unet_middle = get_model("sd_unet_middle"),
-        .decoder = get_model("decoder")
+        .decoder = get_model("decoder"),
+        .temb = get_model("temb")
     });
 #endif
 
@@ -207,6 +211,8 @@ void Context::prepare_buffers() {
         return;
 
     // allocate important tensors
+    temb_in.emplace(_model->temb.allocate_input(0));
+    temb_out.emplace(_model->temb.allocate_output(0));
     tokens.emplace(_model->cond_model.allocate_input(0));
     p_cond.emplace(_model->cond_model.allocate_output(0));
     p_uncond.emplace(_model->cond_model.allocate_output(0));
@@ -263,10 +269,10 @@ void Context::prepare_buffers() {
     img_host.resize(3 * latent_spatial * upscale_factor * latent_spatial * upscale_factor);
 
     // precompute empty prompt conditioning
-    _tokenizer->tokenize(empty_prompt_host, "");
-    tokens->set_data(empty_prompt_host);
-    p_uncond->activate();
-    _model->cond_model.execute();
+    // _tokenizer->tokenize(empty_prompt_host, "");
+    // tokens->set_data(empty_prompt_host);
+    // p_uncond->activate();
+    // _model->cond_model.execute();
 
     p_cond->activate();
     for (auto&& t : p_cond_inputs)
@@ -284,22 +290,38 @@ void Context::prepare_schedule(unsigned int steps) {
     if (steps != 20)
         throw libsdod_exception(ErrorCode::INVALID_ARGUMENT, format("steps!=20 is currently not implemented, got: {}", steps), __func__, __FILE__, STR(__LINE__));
 
-    //TODO: compute schedule properly, this is taken from plms.py with 20 ddim steps
     std::vector<uint32_t> _schedule;
     _solver->prepare(steps, _schedule);
 
-    float log_period = -std::log(10000.0f);
-
     //compute time embeddings
+    constexpr float max_period = 10000.0f;
+    constexpr unsigned int mode_dim = 320;
+    constexpr unsigned int temb_dim = mode_dim * 4;
+    static_assert(mode_dim % 2 == 0, "Odd numbers not handled correctly at the moment, please fix");
+
+    float log_period = -std::log(max_period);
+    std::vector<float> mode;
+    mode.resize(mode_dim, 0.0f);
     t_embeddings.resize(steps);
+
     for (auto i : range(steps)) {
-        auto half = unet_dim/2;
-        t_embeddings[i].resize(unet_dim, 0.0f);
+        auto half = mode_dim/2;
+        t_embeddings[i].resize(temb_dim, 0.0f);
         for (auto j : range(half)) {
-            auto arg = _schedule[i] * (std::exp(log_period * j) / half);
-            t_embeddings[i][j] = std::cos(arg);
-            t_embeddings[i][half+j] = std::sin(arg);
+            auto arg = _schedule[i] * std::exp(log_period * j / static_cast<float>(half));
+            mode[j] = std::cos(arg);
+            mode[half+j] = std::sin(arg);
         }
+        debug("step {}, t: {}, embedding: {}", i, _schedule[i], mode);
+
+        auto&& tick = std::chrono::high_resolution_clock::now();
+        temb_in->set_data(mode);
+        _model->temb.execute();
+        temb_out->get_data(t_embeddings[i]);
+        auto&& tock = std::chrono::high_resolution_clock::now();
+        auto&& diff = std::chrono::duration_cast<std::chrono::milliseconds>(tock - tick);
+        info("Computing time embeddings took {}ms", diff.count());
+        debug("   final embedding: {}", t_embeddings[i]);
     }
 
     info("Time schedule prepared for {} steps!", steps);

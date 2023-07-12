@@ -102,8 +102,8 @@ def convert_onnx(onnx_file):
         print(f'Attempting {("ONNX" if not args.ts else "TorchScript") if args.qnn else "DLC (fp32)"} -> {"QNN model library conversion" if args.qnn else "DLC (int8) quantization"} for part:', part)
         try:
             if args.qnn:
-                if args.fp16:
-                    cc.compile(source_file, model_type=source_type, output_file=target, quantize=False, halfs=True, for_host=False, **extra_args)
+                if args.fp16 or 'temb' in str(onnx_file):
+                    cc.compile(source_file, model_type=source_type, output_file=target, quantize=False, halfs=True, for_host=False, generate_htp_context='sm8550', **extra_args)
                 else:
                     cc.compile(source_file, model_type=source_type, output_file=target, quantize=8, generate_htp_context='sm8550', **extra_args)
             else:

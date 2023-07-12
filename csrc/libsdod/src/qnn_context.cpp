@@ -119,6 +119,7 @@ std::string _dtype_to_str(Qnn_DataType_t dtype) {
         "bool"
     };
 
+
     uint8_t group = (dtype >> 8);
     if (group > 5 || dtype > 0x0508)
         return format("unk({})", hex(dtype));
@@ -127,7 +128,7 @@ std::string _dtype_to_str(Qnn_DataType_t dtype) {
     if (bits != 0x08 && bits != 0x16 && bits != 0x32 && bits != 0x64)
         return format("unk({})", hex(dtype));
 
-    bits = (bits >> 8) + (bits >> 1 & 0x01) + (bits >> 1 & 0x02);
+    bits = (bits >> 4 & 0x01) + (bits >> 5 & 0x01) + (bits >> 5 & 0x02);
     assert(bits >= 0 && bits <= 3);
     assert(group <= 5);
     assert(group < 5 || bits == 0);
@@ -298,11 +299,14 @@ QnnApi::QnnApi(QnnBackendType backend) : backend(backend) {
         }
     }
 #endif
+
+    debug("New QNN API object @ {}", this);
 }
 
 
 QnnApi::~QnnApi() {
     _loaded_backends.erase(backend);
+    debug("QNN API object @ {} destroyed", this);
 }
 
 
@@ -616,6 +620,11 @@ QnnGraph::QnnGraph(QnnGraph::CtorToken&& token)
 }
 
 
+QnnGraph::~QnnGraph() {
+    debug("QNN Graph @ {} destroyed");
+}
+
+
 QnnTensor QnnGraph::allocate_input(unsigned int idx, unsigned batch, bool activate) {
     if (idx >= inputs.size())
         throw libsdod_exception(ErrorCode::INTERNAL_ERROR, format("Input index too large: {}", idx), __func__, __FILE__, STR(__LINE__));
@@ -708,12 +717,14 @@ void QnnGraph::execute_async(std::function<void(void*, Qnn_NotifyStatus_t)> noti
 
 QnnContext::QnnContext(qnn_hnd<Qnn_ContextHandle_t> ctx, std::shared_ptr<void> dl, std::function<void()> free_fn)
     : ctx(ctx), dl(std::move(dl)), free_fn(std::move(free_fn)) {
+    debug("New QNN Context @ {}", this);
 }
 
 
 QnnContext::~QnnContext() {
     if (free_fn)
         free_fn();
+    debug("QNN Context @ {} destroyed", this);
 }
 
 
@@ -723,12 +734,16 @@ QnnBackend::QnnBackend(QnnBackendType backend, std::list<std::string> const& op_
     _init_backend();
     _init_device();
     _init_performance();
+
+    debug("QNN Backend @ {} created", this);
 }
 
 
 QnnBackend::~QnnBackend() {
     if (_htp_power_config_id)
         _htp_perf_infra->destroyPowerConfigId(_htp_power_config_id.value());
+
+    debug("QNN Backend @ {} destroyed", this);
 }
 
 
@@ -953,7 +968,7 @@ graph_list QnnBackend::load_model(std::string const& model_so) {
     debug("Calling graph compose function from library: {}", model_so);
     compose_fn(backend_hnd.get(), api->get_interface(), context_hnd.get(), graph_config_infos, graph_config_infos_count, &graph_infos, &graph_infos_count, false, qnn_log_callback, QNN_LOG_LEVEL_DEBUG);
 
-    std::shared_ptr<QnnContext> ctx{ new QnnContext(context_hnd, dl, [free_fn, graph_infos, graph_infos_count]() mutable { if (graph_infos) free_fn(&graph_infos, graph_infos_count); }) };
+    std::shared_ptr<QnnContext> ctx{ new QnnContext(context_hnd, dl, [free_fn, graph_infos, graph_infos_count]() mutable { if (graph_infos) { debug("Freeing graph info objects..."); free_fn(&graph_infos, graph_infos_count); } }) };
     graph_list ret;
 
     for (auto i : range(graph_infos_count)) {
@@ -1057,6 +1072,7 @@ void qnn2host(const void* src, T* dst, unsigned int elements, const Qnn_Tensor_t
         tf2any<Accum>(dst, reinterpret_cast<const uint16_t*>(src), desc.v1.quantizeParams.scaleOffsetEncoding.offset, desc.v1.quantizeParams.scaleOffsetEncoding.scale, elements, scale);
         break;
 
+    case QNN_DATATYPE_FLOAT_16: return simple_cast<Accum>(dst, reinterpret_cast<const __fp16*>(src), elements, scale);
     case QNN_DATATYPE_FLOAT_32: return simple_cast<Accum>(dst, reinterpret_cast<const float*>(src), elements, scale);
 
     case QNN_DATATYPE_UINT_8: return simple_cast<Accum>(dst, reinterpret_cast<const uint8_t*>(src), elements, scale);
@@ -1086,6 +1102,7 @@ void host2qnn(void* dst, const T* src, unsigned int elements, const Qnn_Tensor_t
         any2tf<Accum>(reinterpret_cast<uint16_t*>(dst), src, desc.v1.quantizeParams.scaleOffsetEncoding.offset, desc.v1.quantizeParams.scaleOffsetEncoding.scale, elements, scale);
         break;
 
+    case QNN_DATATYPE_FLOAT_16: return simple_cast<Accum>(reinterpret_cast<__fp16*>(dst), src, elements, scale);
     case QNN_DATATYPE_FLOAT_32: return simple_cast<Accum>(reinterpret_cast<float*>(dst), src, elements, scale);
 
     case QNN_DATATYPE_UINT_8: return simple_cast<Accum>(reinterpret_cast<uint8_t*>(dst), src, elements, scale);

@@ -23,6 +23,7 @@ struct StableDiffusionModel {
     graph_ref cond_model;
     graph_ref unet_middle;
     graph_ref decoder;
+    graph_ref temb;
 };
 
 
@@ -85,8 +86,8 @@ private:
 
     std::vector<std::vector<float>> t_embeddings; // sequence of encoded timesteps
 
-    unsigned int unet_dim = 1280; // TODO: expose as arg?
-
+    std::optional<QnnTensor> temb_in;
+    std::optional<QnnTensor> temb_out;
     std::optional<QnnTensor> tokens;
     std::optional<QnnTensor> p_cond;
     std::optional<QnnTensor> p_uncond;

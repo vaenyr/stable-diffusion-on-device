@@ -95,8 +95,8 @@ static ErrorCode setup_impl(void** context, const char* models_dir, unsigned int
         cptr->initialize_qnn();
         cptr->load_models();
         cptr->load_tokenizer();
-        cptr->prepare_buffers();
         cptr->prepare_solver();
+        cptr->prepare_buffers();
         cptr->prepare_schedule(steps);
 #endif
     } catch (libsdod_exception const& e) {

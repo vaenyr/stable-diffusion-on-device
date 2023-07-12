@@ -178,6 +178,7 @@ private:
 public:
     explicit QnnGraph(CtorToken&& token);
     QnnGraph(QnnGraph&& other) = delete;
+    ~QnnGraph();
 
     QnnTensor allocate_input(unsigned int idx, unsigned batch=1, bool activate=true);
     QnnTensor attach_input(unsigned int idx, QnnTensor const& t, bool activate=true, bool strict_shape=true);
